@@ -1,0 +1,259 @@
+package repository
+
+import (
+	"comtree/internal/entity"
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	pgxdriver "github.com/wb-go/wbf/dbpg/pgx-driver"
+)
+
+type CommentRepository struct {
+	db *pgxdriver.Postgres
+}
+
+func NewCommentRepository(db *pgxdriver.Postgres) *CommentRepository {
+	return &CommentRepository{db: db}
+}
+
+func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecuter, comment entity.Comment) (*entity.Comment, error) {
+	const op = "repository.comment.Create"
+
+	var err error
+	comment.ID, err = uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("%s: uuid v7: %w", op, err)
+	}
+
+	insert := r.db.Insert("comments").
+		Columns("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
+		Values(comment.ID, comment.ParentID, comment.Author, comment.Content, comment.IsDeleted, comment.Path, comment.Depth).
+		Suffix("RETURNING id, parent_id, author, content, is_deleted, path, depth")
+
+	query, args, err := insert.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("%s: insert query: %w", op, err)
+	}
+
+	var result entity.Comment
+	err = qe.QueryRow(ctx, query, args...).Scan(
+		&result.ID,
+		&result.ParentID,
+		&result.Author,
+		&result.Content,
+		&result.IsDeleted,
+		&result.Path,
+		&result.Depth,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return &result, nil
+}
+
+func (r *CommentRepository) GetByID(ctx context.Context, qe pgxdriver.QueryExecuter, id uuid.UUID) (*entity.Comment, error) {
+	const op = "repository.comment.GetByID"
+
+	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
+		From("comments").
+		Where(squirrel.Eq{"id": id})
+
+	query, args, err := selectQuery.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("%s: select query: %w", op, err)
+	}
+
+	var comment entity.Comment
+	err = qe.QueryRow(ctx, query, args...).Scan(
+		&comment.ID,
+		&comment.ParentID,
+		&comment.Author,
+		&comment.Content,
+		&comment.IsDeleted,
+		&comment.Path,
+		&comment.Depth,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, entity.ErrDataNotFound
+		}
+		return nil, fmt.Errorf("get comment by id: %w", err)
+	}
+
+	return &comment, nil
+}
+
+func (r *CommentRepository) GetChildren(ctx context.Context, qe pgxdriver.QueryExecuter, parentPath string, limit, offset int) ([]entity.Comment, error) {
+	const op = "repository.comment.GetChildren"
+
+	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
+		From("comments").
+		Where(squirrel.Like{"path": parentPath + "%s"}).
+		Where(squirrel.Eq{"id_deleted": false}).
+		OrderBy("path ASC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset))
+
+	query, args, err := selectQuery.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("%s: select query: %w", op, err)
+	}
+
+	rows, err := qe.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+	defer rows.Close()
+
+	comments := make([]entity.Comment, 0)
+	for rows.Next() {
+		var comment entity.Comment
+		if err := rows.Scan(
+			&comment.ID,
+			&comment.ParentID,
+			&comment.Author,
+			&comment.Content,
+			&comment.IsDeleted,
+			&comment.Path,
+			&comment.Depth,
+		); err != nil {
+			return nil, fmt.Errorf("%s: scan: %w", op, err)
+		}
+		comments = append(comments, comment)
+	}
+	return comments, nil
+}
+func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.QueryExecuter, limit, offset int) ([]entity.Comment, int64, error) {
+	const op = "repository.comment.GetRootComments"
+
+	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
+		From("comments").
+		Where(squirrel.Eq{"parent_id": nil, "is_deleted": false}).
+		OrderBy("id DESC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset))
+
+	query, args, err := selectQuery.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: select query: %w", op, err)
+	}
+
+	rows, err := qe.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: %w", op, err)
+	}
+	defer rows.Close()
+
+	comments := make([]entity.Comment, 0)
+	for rows.Next() {
+		var comment entity.Comment
+		if err := rows.Scan(
+			&comment.ID,
+			&comment.ParentID,
+			&comment.Author,
+			&comment.Content,
+			&comment.IsDeleted,
+			&comment.Path,
+			&comment.Depth,
+		); err != nil {
+			return nil, 0, fmt.Errorf("%s: scan: %w", op, err)
+		}
+		comments = append(comments, comment)
+	}
+
+	countQuery := r.db.Select("COUNT(*)").
+		From("comments").
+		Where(squirrel.Eq{"parent_id": nil, "is_deleted": false})
+
+	query, args, err = countQuery.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: count query: %w", op, err)
+	}
+
+	var total int64
+	if err := qe.QueryRow(ctx, query, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("%s: count w%", op, err)
+	}
+
+	return comments, total, nil
+}
+func (r *CommentRepository) SoftDelete(ctx context.Context, qe pgxdriver.QueryExecuter, path string) error {
+	const op = "repository.comment.SoftDelete"
+
+	update := r.db.Update("comments").
+		Set("is_deleted", true).
+		Where(squirrel.Eq{"path": path + "%"})
+
+	query, args, err := update.ToSql()
+	if err != nil {
+		return fmt.Errorf("%s: update query: %w", op, err)
+	}
+
+	if _, err := qe.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+func (r *CommentRepository) Search(ctx context.Context, qe pgxdriver.QueryExecuter, searchQuery string, limit, offset int) ([]entity.Comment, int64, error) {
+	const op = "repository.comment.Search"
+
+	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
+		From("comments").
+		Where("to_tsvector('english', content || ' ' || author) @@ plainto_tsquery('english', ?)", searchQuery).
+		Where(squirrel.Eq{"is_deleted": false}).
+		OrderBy("id DESC").
+		Limit(uint64(limit)).
+		Offset(uint64(offset))
+
+	query, args, err := selectQuery.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: select query: %w", op, err)
+	}
+
+	rows, err := qe.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: %w", op, err)
+	}
+	defer rows.Close()
+
+	comments := make([]entity.Comment, 0)
+	for rows.Next() {
+		var comment entity.Comment
+		if err := rows.Scan(
+			&comment.ID,
+			&comment.ParentID,
+			&comment.Author,
+			&comment.Content,
+			&comment.IsDeleted,
+			&comment.Path,
+			&comment.Depth,
+		); err != nil {
+			return nil, 0, fmt.Errorf("%s: scan: %w", op, err)
+		}
+		comments = append(comments, comment)
+	}
+
+	countQuery := r.db.Select("COUNT(*)").
+		From("comments").
+		Where("to_tsvector('english', content || ' ' || author) @@ plainto_tsquery('english', ?)", searchQuery).
+		Where(squirrel.Eq{"is_deleted": false})
+
+	query, args, err = countQuery.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: count query: %w", op, err)
+	}
+
+	var total int64
+	if err := qe.QueryRow(ctx, query, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("%s: count: %w", op, err)
+	}
+
+	return comments, total, nil
+}
