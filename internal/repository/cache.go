@@ -66,46 +66,79 @@ func (r *CacheRepository) SetComment(ctx context.Context, comment *entity.Commen
 }
 
 func (r *CacheRepository) DeleteComment(ctx context.Context, id uuid.UUID) error {
+	const op = "repository.cache.DeleteComment"
 	key := _commentPrefix + id.String()
 	if err := r.rdb.Del(ctx, key); err != nil {
-		return fmt.Errorf("redis del: %w", err)
+		return fmt.Errorf("%s: %w", err)
 	}
 	return nil
 }
 
 func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int) (*entity.CommentListResult, error) {
+	const op = "repository.cache.GetCommentTree"
+
 	key := r.getTreeCacheKey(parentID, page, pageSize)
 
 	cached, err := r.rdb.Get(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("redis get: %w", err)
+		return nil, fmt.Errorf("%s: %w", err)
 	}
 
 	var result entity.CommentListResult
 	if err := json.Unmarshal([]byte(cached), &result); err != nil {
-		return nil, fmt.Errorf("unmarshal tree: %w", err)
+		return nil, fmt.Errorf("%s: unmarshal: %w", err)
 	}
 
 	return &result, nil
 }
 
 func (r *CacheRepository) SetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int, result *entity.CommentListResult) error {
+	const op = "repository.cache.SetCommentTree"
 	key := r.getTreeCacheKey(parentID, page, pageSize)
 
 	data, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("marshal tree: %w", err)
+		return fmt.Errorf("%s: marshal: %w", op, err)
 	}
 
 	if err := r.rdb.SetWithExpiration(ctx, key, data, r.ttl); err != nil {
-		return fmt.Errorf("redis set: %w", err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	return nil
 }
 
 func (r *CacheRepository) InvalidateTree(ctx context.Context) error {
-	// todo
+	const op = "repository.cache.InvalidateTree"
+
+	pattern := _commentTreePrefix + "*"
+	var cursor uint64
+
+	for {
+		cmd := r.rdb.Scan(ctx, cursor, pattern, 100)
+		if cmd.Err() != nil {
+			return fmt.Errorf("%s: redis scan: %w", op, cmd.Err())
+		}
+
+		keys, nextCursor, err := cmd.Result()
+		if err != nil {
+			return fmt.Errorf("%s: scan result: %w", op, err)
+		}
+
+		for _, key := range keys {
+			if err := r.rdb.Del(ctx, key); err != nil {
+				continue
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return nil
+}
 
 func (r *CacheRepository) getTreeCacheKey(parentID *uuid.UUID, page, pageSize int) string {
 	if parentID == nil {

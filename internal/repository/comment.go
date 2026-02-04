@@ -21,22 +21,20 @@ func NewCommentRepository(db *pgxdriver.Postgres) *CommentRepository {
 }
 
 func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecuter, comment entity.Comment) (*entity.Comment, error) {
-	const op = "repository.comment.Create"
-
 	var err error
 	comment.ID, err = uuid.NewV7()
 	if err != nil {
-		return nil, fmt.Errorf("%s: uuid v7: %w", op, err)
+		return nil, fmt.Errorf("new uuid v7: %w", err)
 	}
 
 	insert := r.db.Insert("comments").
-		Columns("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
-		Values(comment.ID, comment.ParentID, comment.Author, comment.Content, comment.IsDeleted, comment.Path, comment.Depth).
+		Columns("id", "parent_id", "author", "content", "is_deleted", "depth").
+		Values(comment.ID, comment.ParentID, comment.Author, comment.Content, comment.IsDeleted, comment.Depth).
 		Suffix("RETURNING id, parent_id, author, content, is_deleted, path, depth")
 
 	query, args, err := insert.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("%s: insert query: %w", op, err)
+		return nil, fmt.Errorf("build insert query: %w", err)
 	}
 
 	var result entity.Comment
@@ -51,7 +49,7 @@ func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecut
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("create comment: %w", err)
 	}
 
 	return &result, nil

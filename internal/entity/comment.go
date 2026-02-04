@@ -13,11 +13,11 @@ type Comment struct {
 	Content   string     `json:"content"`
 	IsDeleted bool       `json:"is_deleted"`
 	Path      string     `json:"path"`
-	Depth     int        `json:"depth`
+	Depth     int        `json:"depth"`
 }
 
 func (c *Comment) CreatedAt() time.Time {
-	return
+	return ExtractTimestampFromUUIDv7(c.ID)
 }
 
 type CommentTree struct {
