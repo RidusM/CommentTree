@@ -1,13 +1,12 @@
 package service
 
 import (
+	"comtree/internal/entity"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"comment-tree/internal/entity"
 
 	"github.com/google/uuid"
 	pgxdriver "github.com/wb-go/wbf/dbpg/pgx-driver"
