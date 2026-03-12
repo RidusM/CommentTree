@@ -108,7 +108,7 @@ func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentReq
 	log := s.log.Ctx(ctx)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]interface{}{
+	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
 		"has_parent": req.ParentID != nil,
 		"author":     req.Author,
 	})
@@ -133,7 +133,7 @@ func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentReq
 		if req.ParentID != nil {
 			parent, err := s.repo.GetByID(ctx, tx, *req.ParentID)
 			if err != nil {
-				if errors.Is(err, entity.ErrDataNotFound) {
+				if errors.Is(err, entity.ErrCommentNotFound) {
 					return ErrParentNotFound
 				}
 				return fmt.Errorf("get parent: %w", err)
@@ -193,7 +193,7 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 	log := s.log.Ctx(ctx)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]interface{}{
+	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
 		"has_parent": req.ParentID != nil,
 		"page":       req.Page,
 	})
@@ -251,7 +251,7 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 		} else {
 			parent, err := s.repo.GetByID(ctx, tx, *req.ParentID)
 			if err != nil {
-				if errors.Is(err, entity.ErrDataNotFound) {
+				if errors.Is(err, entity.ErrCommentNotFound) {
 					return ErrCommentNotFound
 				}
 				return fmt.Errorf("get parent: %w", err)
@@ -299,7 +299,7 @@ func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error 
 	log := s.log.Ctx(ctx)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]interface{}{
+	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
 		"id": id.String(),
 	})
 
@@ -311,7 +311,7 @@ func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error 
 	err := s.tm.ExecuteInTransaction(ctx, "delete_comment", func(tx pgxdriver.QueryExecuter) error {
 		comment, err := s.repo.GetByID(ctx, tx, id)
 		if err != nil {
-			if errors.Is(err, entity.ErrDataNotFound) {
+			if errors.Is(err, entity.ErrCommentNotFound) {
 				return ErrCommentNotFound
 			}
 			return fmt.Errorf("get comment: %w", err)
@@ -354,7 +354,7 @@ func (s *CommentService) SearchComments(ctx context.Context, req SearchRequest) 
 	log := s.log.Ctx(ctx)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]interface{}{
+	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
 		"query": req.Query,
 	})
 
@@ -456,7 +456,7 @@ func (s *CommentService) validateCreateRequest(req CreateCommentRequest) error {
 	return nil
 }
 
-func (s *CommentService) logSlowOperation(ctx context.Context, op string, startTime time.Time, fields map[string]interface{}) {
+func (s *CommentService) logSlowOperation(ctx context.Context, op string, startTime time.Time, fields map[string]any) {
 	duration := time.Since(startTime)
 	if duration > _slowOperationThresh {
 		attrs := []logger.Attr{

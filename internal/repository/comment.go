@@ -21,11 +21,7 @@ func NewCommentRepository(db *pgxdriver.Postgres) *CommentRepository {
 }
 
 func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecuter, comment entity.Comment) (*entity.Comment, error) {
-	var err error
-	comment.ID, err = uuid.NewV7()
-	if err != nil {
-		return nil, fmt.Errorf("new uuid v7: %w", err)
-	}
+	const op = "repository.comment.Create"
 
 	insert := r.db.Insert("comments").
 		Columns("id", "parent_id", "author", "content", "is_deleted", "depth").
@@ -34,7 +30,7 @@ func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecut
 
 	query, args, err := insert.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build insert query: %w", err)
+		return nil, fmt.Errorf("%s: build insert query: %w", op, err)
 	}
 
 	var result entity.Comment
@@ -49,7 +45,7 @@ func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecut
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("create comment: %w", err)
+		return nil, fmt.Errorf("%s: create comment: %w", op, err)
 	}
 
 	return &result, nil
@@ -79,9 +75,9 @@ func (r *CommentRepository) GetByID(ctx context.Context, qe pgxdriver.QueryExecu
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, entity.ErrDataNotFound
+			return nil, entity.ErrCommentNotFound
 		}
-		return nil, fmt.Errorf("get comment by id: %w", err)
+		return nil, fmt.Errorf("%s: get comment by id: %w", op, err)
 	}
 
 	return &comment, nil
@@ -176,7 +172,7 @@ func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.Qu
 
 	var total int64
 	if err := qe.QueryRow(ctx, query, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("%s: count w%", op, err)
+		return nil, 0, fmt.Errorf("%s: count: %w", op, err)
 	}
 
 	return comments, total, nil

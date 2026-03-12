@@ -6,14 +6,20 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	millisPerSecond  = 1000
+	nanosPerMilli    = 1_000_000
+	maxUnixTimestamp = 1<<63 - 1
+)
+
 type Comment struct {
-	ID        uuid.UUID  `json:"id"`
-	ParentID  *uuid.UUID `json:"parent_id"`
-	Author    string     `json:"author"`
-	Content   string     `json:"content"`
-	IsDeleted bool       `json:"is_deleted"`
-	Path      string     `json:"path"`
-	Depth     int        `json:"depth"`
+	ID        uuid.UUID  `json:"id"                   validate:"required,uuid_strict"`
+	ParentID  *uuid.UUID `json:"parent_id"                   validate:"required,uuid_strict"`
+	Author    string     `json:"author" validate:"required"`
+	Content   string     `json:"content" validate:"required"`
+	IsDeleted bool       `json:"is_deleted" validate:"required"`
+	Path      string     `json:"path" validate:"required"`
+	Depth     int        `json:"depth" validate:"required,min=0,max=10"`
 }
 
 func (c *Comment) CreatedAt() time.Time {
@@ -21,30 +27,35 @@ func (c *Comment) CreatedAt() time.Time {
 }
 
 type CommentTree struct {
-	Comment  Comment       `json:"comment"`
-	Children []CommentTree `json:"children,omitempty"`
+	Comment  Comment       `json:"comment" validate:"required"`
+	Children []CommentTree `json:"children,omitempty" validate:"required"`
 }
 
 type CommentListResult struct {
-	Comments   []CommentTree `json:"comments"`
-	TotalCount int64         `json:"total_count"`
-	Page       int           `json:"page"`
-	PageSize   int           `json:"page_size"`
-	TotalPages int           `json:"total_pages"`
+	Comments   []CommentTree `json:"comments" validate:"required"`
+	TotalCount int64         `json:"total_count" validate:"required"`
+	Page       int           `json:"page" validate:"required,min=0,max=100"`
+	PageSize   int           `json:"page_size" validate:"required,min = 0, max= 100"`
+	TotalPages int           `json:"total_pages" validate:"required"`
 }
 
 type SearchResult struct {
-	Comments   []Comment `json:"comments"`
-	TotalCount int64     `json:"total_count"`
-	Query      string    `json:"query"`
+	Comments   []Comment `json:"comments" validate:"required"`
+	TotalCount int64     `json:"total_count" validate:"required"`
+	Query      string    `json:"query" validate:"required"`
 }
 
 func ExtractTimestampFromUUIDv7(id uuid.UUID) time.Time {
 	timestamp := uint64(id[0])<<40 | uint64(id[1])<<32 | uint64(id[2])<<24 |
 		uint64(id[3])<<16 | uint64(id[4])<<8 | uint64(id[5])
 
-	seconds := timestamp / 1000
-	nanos := (timestamp % 1000) * 1_000_000
+	seconds := timestamp / millisPerSecond
+	nanos := (timestamp % millisPerSecond) * nanosPerMilli
 
+	if seconds > maxUnixTimestamp {
+		return time.Time{}
+	}
+
+	// nolint:gosec
 	return time.Unix(int64(seconds), int64(nanos)).UTC()
 }

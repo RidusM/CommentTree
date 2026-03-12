@@ -69,7 +69,7 @@ func (r *CacheRepository) DeleteComment(ctx context.Context, id uuid.UUID) error
 	const op = "repository.cache.DeleteComment"
 	key := _commentPrefix + id.String()
 	if err := r.rdb.Del(ctx, key); err != nil {
-		return fmt.Errorf("%s: %w", err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
@@ -81,12 +81,12 @@ func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID *uuid.UUI
 
 	cached, err := r.rdb.Get(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", err)
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	var result entity.CommentListResult
 	if err := json.Unmarshal([]byte(cached), &result); err != nil {
-		return nil, fmt.Errorf("%s: unmarshal: %w", err)
+		return nil, fmt.Errorf("%s: unmarshal: %w", op, err)
 	}
 
 	return &result, nil
