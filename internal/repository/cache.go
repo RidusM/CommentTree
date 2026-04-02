@@ -4,11 +4,13 @@ import (
 	"comtree/internal/entity"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
-	"github.com/wb-go/wbf/redis"
+	rediswbf "github.com/wb-go/wbf/redis"
 )
 
 const (
@@ -18,28 +20,33 @@ const (
 )
 
 type CacheRepository struct {
-	rdb *redis.Client
-	ttl time.Duration
+	rdb *rediswbf.Client
 }
 
-func NewCacheRepository(rdb *redis.Client, ttl time.Duration) *CacheRepository {
-	if ttl == 0 {
-		ttl = _cacheTTL
-	}
-	return &CacheRepository{
-		rdb: rdb,
-		ttl: ttl,
-	}
+func NewCacheRepository(rdb *rediswbf.Client) *CacheRepository {
+	return &CacheRepository{rdb: rdb}
+}
+
+func (r *CacheRepository) cacheKeyComment(id uuid.UUID) string {
+	return _commentPrefix + id.String()
+}
+
+func (r *CacheRepository) cacheKeyTree(id uuid.UUID) string {
+	return _commentTreePrefix + id.String()
 }
 
 func (r *CacheRepository) GetComment(ctx context.Context, id uuid.UUID) (*entity.Comment, error) {
 	const op = "repository.cache.GetComment"
 
-	key := _commentPrefix + id.String()
-
-	cached, err := r.rdb.Get(ctx, key)
+	cached, err := r.rdb.Get(ctx, r.cacheKeyComment(id))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
+		if errors.Is(err, redis.Nil) {
+			return nil, entity.ErrDataNotFound
+		}
+		return nil, fmt.Errorf("%s: redis get: %w", op, err)
+	}
+	if cached == "" {
+		return nil, entity.ErrDataNotFound
 	}
 
 	var comment entity.Comment
@@ -50,36 +57,32 @@ func (r *CacheRepository) GetComment(ctx context.Context, id uuid.UUID) (*entity
 	return &comment, nil
 }
 
-func (r *CacheRepository) SetComment(ctx context.Context, comment *entity.Comment) error {
-	const op = "repository.cache.SetComment"
-	key := _commentPrefix + comment.ID.String()
+func (r *CacheRepository) SaveComment(ctx context.Context, comment *entity.Comment) error {
+	const op = "repository.cache.SaveComment"
 
 	data, err := json.Marshal(comment)
 	if err != nil {
 		return fmt.Errorf("%s: marshal: %w", op, err)
 	}
 
-	if err := r.rdb.SetWithExpiration(ctx, key, data, r.ttl); err != nil {
+	if err := r.rdb.SetWithExpiration(ctx, r.cacheKeyComment(comment.ID), data, _cacheTTL); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
 
-func (r *CacheRepository) DeleteComment(ctx context.Context, id uuid.UUID) error {
-	const op = "repository.cache.DeleteComment"
-	key := _commentPrefix + id.String()
-	if err := r.rdb.Del(ctx, key); err != nil {
+func (r *CacheRepository) InvalidateComment(ctx context.Context, id uuid.UUID) error {
+	const op = "repository.cache.InvalidateComment"
+	if err := r.rdb.Del(ctx, r.cacheKeyComment(id)); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
 
-func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int) (*entity.CommentListResult, error) {
+func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID uuid.UUID, page, pageSize int) (*entity.CommentListResult, error) {
 	const op = "repository.cache.GetCommentTree"
 
-	key := r.getTreeCacheKey(parentID, page, pageSize)
-
-	cached, err := r.rdb.Get(ctx, key)
+	cached, err := r.rdb.Get(ctx, r.cacheKeyTree(parentID))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
@@ -92,16 +95,15 @@ func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID *uuid.UUI
 	return &result, nil
 }
 
-func (r *CacheRepository) SetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int, result *entity.CommentListResult) error {
-	const op = "repository.cache.SetCommentTree"
-	key := r.getTreeCacheKey(parentID, page, pageSize)
+func (r *CacheRepository) SaveCommentTree(ctx context.Context, parentID uuid.UUID, page, pageSize int, result *entity.CommentListResult) error {
+	const op = "repository.cache.SaveCommentTree"
 
 	data, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("%s: marshal: %w", op, err)
 	}
 
-	if err := r.rdb.SetWithExpiration(ctx, key, data, r.ttl); err != nil {
+	if err := r.rdb.SetWithExpiration(ctx, r.cacheKeyTree(parentID), data, _cacheTTL); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -138,11 +140,4 @@ func (r *CacheRepository) InvalidateTree(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (r *CacheRepository) getTreeCacheKey(parentID *uuid.UUID, page, pageSize int) string {
-	if parentID == nil {
-		return fmt.Sprintf("%sroot:p%d:ps%d", _commentTreePrefix, page, pageSize)
-	}
-	return fmt.Sprintf("%s%s:p%d:ps%d", _commentTreePrefix, parentID.String(), page, pageSize)
 }

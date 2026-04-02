@@ -1,5 +1,5 @@
 // nolint: revive,staticcheck
-package httpt
+package handler
 
 import (
 	"fmt"
@@ -23,7 +23,7 @@ import (
 // @Failure 400 {object} ErrorResponse "Ошибка валидации"
 // @Failure 500 {object} ErrorResponse "Внутренняя ошибка"
 // @Router /notify [post]
-func (h *NotifyHandler) CreateNotification(c *gin.Context) {
+func (h *TreeHandler) CreateNotification(c *gin.Context) {
 	const op = "transport.http.NotifyHandler.CreateNotification"
 	ctx := c.Request.Context()
 

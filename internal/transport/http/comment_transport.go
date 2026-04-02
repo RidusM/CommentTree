@@ -1,10 +1,8 @@
-package httpt
+package handler
 
 import (
+	"comtree/internal/entity"
 	"context"
-
-	"delayednotifier/internal/entity"
-	"delayednotifier/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -13,9 +11,9 @@ import (
 
 type NotifyService interface {
 	CreateComment(ctx context.Context, req CreateCommentRequest) (*entity.Comment, error)
-	GetComments(ctx context.Context, req GetCommentsRequest) (*entity.CommentListResult, error)
+	GetComments(ctx context.Context, req CreateCommentRequest) (*entity.CommentListResult, error)
 	DeleteComment(ctx context.Context, id uuid.UUID) error
-	SearchComments(ctx context.Context, req SearchRequest) (*entity.SearchResult, error)
+	SearchComments(ctx context.Context, req ) (*entity.SearchResult, error)
 }
 
 type NotifyHandler struct {

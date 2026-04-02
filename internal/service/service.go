@@ -18,7 +18,7 @@ const (
 	_defaultMaxDepth     = 10
 	_defaultPageSize     = 20
 	_maxPageSize         = 100
-	_slowOperationThresh = 200 * time.Millisecond
+	_slowOperationThreshold = 200 * time.Millisecond
 )
 
 var (
@@ -42,9 +42,9 @@ type (
 	CacheRepository interface {
 		GetComment(ctx context.Context, id uuid.UUID) (*entity.Comment, error)
 		SetComment(ctx context.Context, comment *entity.Comment) error
-		DeleteComment(ctx context.Context, id uuid.UUID) error
+		InvalidateComment(ctx context.Context, id uuid.UUID) error
 		GetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int) (*entity.CommentListResult, error)
-		SetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int, result *entity.CommentListResult) error
+		SaveCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int, result *entity.CommentListResult) error
 		InvalidateTree(ctx context.Context) error
 	}
 
@@ -105,22 +105,17 @@ func NewCommentService(
 func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentRequest) (*entity.Comment, error) {
 	const op = "service.CommentService.CreateComment"
 
-	log := s.log.Ctx(ctx)
+	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
-		"has_parent": req.ParentID != nil,
-		"author":     req.Author,
-	})
+	defer s.logSlowOperation(ctx, op, startTime, logger.Bool("has_parent", req.ParentID != nil), logger.String("author", req.Author))
 
 	log.LogAttrs(ctx, logger.InfoLevel, "create comment started",
-		logger.String("op", op),
 		logger.String("author", req.Author),
 	)
 
 	if err := s.validateCreateRequest(req); err != nil {
 		log.LogAttrs(ctx, logger.ErrorLevel, "validation failed",
-			logger.String("op", op),
 			logger.Any("error", err),
 		)
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -170,7 +165,6 @@ func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentReq
 
 	if err != nil {
 		log.LogAttrs(ctx, logger.ErrorLevel, "creation failed",
-			logger.String("op", op),
 			logger.Any("error", err),
 		)
 		return nil, fmt.Errorf("%s: %w", op, err)
@@ -179,7 +173,6 @@ func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentReq
 	_ = s.cache.InvalidateTree(ctx)
 
 	log.LogAttrs(ctx, logger.InfoLevel, "comment created",
-		logger.String("op", op),
 		logger.String("id", result.ID.String()),
 		logger.Duration("duration", time.Since(startTime)),
 	)
@@ -190,13 +183,10 @@ func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentReq
 func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest) (*entity.CommentListResult, error) {
 	const op = "service.CommentService.GetComments"
 
-	log := s.log.Ctx(ctx)
+	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
-		"has_parent": req.ParentID != nil,
-		"page":       req.Page,
-	})
+	defer s.logSlowOperation(ctx, op, startTime, logger.Bool("has_parent", req.ParentID != nil), logger.Int("page", req.Page))
 
 	if req.PageSize <= 0 {
 		req.PageSize = s.defaultPageSize
@@ -210,9 +200,7 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 
 	cached, err := s.cache.GetCommentTree(ctx, req.ParentID, req.Page, req.PageSize)
 	if err == nil && cached != nil {
-		log.LogAttrs(ctx, logger.InfoLevel, "served from cache",
-			logger.String("op", op),
-		)
+		log.LogAttrs(ctx, logger.InfoLevel, "served from cache")
 		return cached, nil
 	}
 
@@ -276,16 +264,14 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 
 	if err != nil {
 		log.LogAttrs(ctx, logger.ErrorLevel, "get comments failed",
-			logger.String("op", op),
 			logger.Any("error", err),
 		)
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	_ = s.cache.SetCommentTree(ctx, req.ParentID, req.Page, req.PageSize, result)
+	_ = s.cache.SaveCommentTree(ctx, req.ParentID, req.Page, req.PageSize, result)
 
 	log.LogAttrs(ctx, logger.InfoLevel, "comments retrieved",
-		logger.String("op", op),
 		logger.Int("count", len(result.Comments)),
 		logger.Duration("duration", time.Since(startTime)),
 	)
@@ -296,15 +282,12 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error {
 	const op = "service.CommentService.DeleteComment"
 
-	log := s.log.Ctx(ctx)
+	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
-		"id": id.String(),
-	})
+	defer s.logSlowOperation(ctx, op, startTime, logger.Any("id", id))
 
 	log.LogAttrs(ctx, logger.InfoLevel, "delete comment started",
-		logger.String("op", op),
 		logger.String("id", id.String()),
 	)
 
@@ -330,17 +313,15 @@ func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error 
 
 	if err != nil {
 		log.LogAttrs(ctx, logger.ErrorLevel, "delete failed",
-			logger.String("op", op),
 			logger.Any("error", err),
 		)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	_ = s.cache.DeleteComment(ctx, id)
+	_ = s.cache.InvalidateComment(ctx, id)
 	_ = s.cache.InvalidateTree(ctx)
 
 	log.LogAttrs(ctx, logger.InfoLevel, "comment deleted",
-		logger.String("op", op),
 		logger.String("id", id.String()),
 		logger.Duration("duration", time.Since(startTime)),
 	)
@@ -351,12 +332,10 @@ func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error 
 func (s *CommentService) SearchComments(ctx context.Context, req SearchRequest) (*entity.SearchResult, error) {
 	const op = "service.CommentService.SearchComments"
 
-	log := s.log.Ctx(ctx)
+	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, map[string]any{
-		"query": req.Query,
-	})
+	defer s.logSlowOperation(ctx, op, startTime, logger.Any("query", req.Query))
 
 	if strings.TrimSpace(req.Query) == "" {
 		return nil, fmt.Errorf("%s: %w", op, ErrInvalidSearchQuery)
@@ -392,14 +371,12 @@ func (s *CommentService) SearchComments(ctx context.Context, req SearchRequest) 
 
 	if err != nil {
 		log.LogAttrs(ctx, logger.ErrorLevel, "search failed",
-			logger.String("op", op),
 			logger.Any("error", err),
 		)
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
 	log.LogAttrs(ctx, logger.InfoLevel, "search completed",
-		logger.String("op", op),
 		logger.Int("results", len(result.Comments)),
 		logger.Duration("duration", time.Since(startTime)),
 	)
@@ -456,16 +433,18 @@ func (s *CommentService) validateCreateRequest(req CreateCommentRequest) error {
 	return nil
 }
 
-func (s *CommentService) logSlowOperation(ctx context.Context, op string, startTime time.Time, fields map[string]any) {
+func (s *CommentService) logSlowOperation(
+	ctx context.Context,
+	op string,
+	startTime time.Time,
+	attrs ...logger.Attr,
+) {
 	duration := time.Since(startTime)
-	if duration > _slowOperationThresh {
-		attrs := []logger.Attr{
+	if duration > _slowOperationThreshold {
+		allAttrs := append([]logger.Attr{
 			logger.String("op", op),
 			logger.Duration("duration", duration),
-		}
-		for k, v := range fields {
-			attrs = append(attrs, logger.Any(k, v))
-		}
-		s.log.Ctx(ctx).LogAttrs(ctx, logger.WarnLevel, "slow operation detected", attrs...)
+		}, attrs...)
+		s.log.Ctx(ctx).LogAttrs(ctx, logger.WarnLevel, "slow operation detected", allAttrs...)
 	}
 }

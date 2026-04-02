@@ -23,6 +23,8 @@ func NewCommentRepository(db *pgxdriver.Postgres) *CommentRepository {
 func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecuter, comment entity.Comment) (*entity.Comment, error) {
 	const op = "repository.comment.Create"
 
+executor := execOrDB(qe, r.db)
+
 	insert := r.db.Insert("comments").
 		Columns("id", "parent_id", "author", "content", "is_deleted", "depth").
 		Values(comment.ID, comment.ParentID, comment.Author, comment.Content, comment.IsDeleted, comment.Depth).
@@ -34,7 +36,7 @@ func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecut
 	}
 
 	var result entity.Comment
-	err = qe.QueryRow(ctx, query, args...).Scan(
+	err = executor.QueryRow(ctx, query, args...).Scan(
 		&result.ID,
 		&result.ParentID,
 		&result.Author,
@@ -54,6 +56,8 @@ func (r *CommentRepository) Create(ctx context.Context, qe pgxdriver.QueryExecut
 func (r *CommentRepository) GetByID(ctx context.Context, qe pgxdriver.QueryExecuter, id uuid.UUID) (*entity.Comment, error) {
 	const op = "repository.comment.GetByID"
 
+	executor := execOrDB(qe, r.db)
+
 	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
 		From("comments").
 		Where(squirrel.Eq{"id": id})
@@ -64,7 +68,7 @@ func (r *CommentRepository) GetByID(ctx context.Context, qe pgxdriver.QueryExecu
 	}
 
 	var comment entity.Comment
-	err = qe.QueryRow(ctx, query, args...).Scan(
+	err = executor.QueryRow(ctx, query, args...).Scan(
 		&comment.ID,
 		&comment.ParentID,
 		&comment.Author,
@@ -86,6 +90,8 @@ func (r *CommentRepository) GetByID(ctx context.Context, qe pgxdriver.QueryExecu
 func (r *CommentRepository) GetChildren(ctx context.Context, qe pgxdriver.QueryExecuter, parentPath string, limit, offset int) ([]entity.Comment, error) {
 	const op = "repository.comment.GetChildren"
 
+	executor := execOrDB(qe, r.db)
+
 	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
 		From("comments").
 		Where(squirrel.Like{"path": parentPath + "%s"}).
@@ -99,7 +105,7 @@ func (r *CommentRepository) GetChildren(ctx context.Context, qe pgxdriver.QueryE
 		return nil, fmt.Errorf("%s: select query: %w", op, err)
 	}
 
-	rows, err := qe.Query(ctx, query, args...)
+	rows, err := executor.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
@@ -126,6 +132,8 @@ func (r *CommentRepository) GetChildren(ctx context.Context, qe pgxdriver.QueryE
 func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.QueryExecuter, limit, offset int) ([]entity.Comment, int64, error) {
 	const op = "repository.comment.GetRootComments"
 
+	executor := execOrDB(qe, r.db)
+
 	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
 		From("comments").
 		Where(squirrel.Eq{"parent_id": nil, "is_deleted": false}).
@@ -138,7 +146,7 @@ func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.Qu
 		return nil, 0, fmt.Errorf("%s: select query: %w", op, err)
 	}
 
-	rows, err := qe.Query(ctx, query, args...)
+	rows, err := executor.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: %w", op, err)
 	}
@@ -171,7 +179,7 @@ func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.Qu
 	}
 
 	var total int64
-	if err := qe.QueryRow(ctx, query, args...).Scan(&total); err != nil {
+	if err := executor.QueryRow(ctx, query, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("%s: count: %w", op, err)
 	}
 
@@ -179,6 +187,8 @@ func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.Qu
 }
 func (r *CommentRepository) SoftDelete(ctx context.Context, qe pgxdriver.QueryExecuter, path string) error {
 	const op = "repository.comment.SoftDelete"
+
+	executor := execOrDB(qe, r.db)
 
 	update := r.db.Update("comments").
 		Set("is_deleted", true).
@@ -189,7 +199,7 @@ func (r *CommentRepository) SoftDelete(ctx context.Context, qe pgxdriver.QueryEx
 		return fmt.Errorf("%s: update query: %w", op, err)
 	}
 
-	if _, err := qe.Exec(ctx, query, args...); err != nil {
+	if _, err := executor.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -197,6 +207,8 @@ func (r *CommentRepository) SoftDelete(ctx context.Context, qe pgxdriver.QueryEx
 }
 func (r *CommentRepository) Search(ctx context.Context, qe pgxdriver.QueryExecuter, searchQuery string, limit, offset int) ([]entity.Comment, int64, error) {
 	const op = "repository.comment.Search"
+
+	executor := execOrDB(qe, r.db)
 
 	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
 		From("comments").
@@ -211,7 +223,7 @@ func (r *CommentRepository) Search(ctx context.Context, qe pgxdriver.QueryExecut
 		return nil, 0, fmt.Errorf("%s: select query: %w", op, err)
 	}
 
-	rows, err := qe.Query(ctx, query, args...)
+	rows, err := executor.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: %w", op, err)
 	}
@@ -245,7 +257,7 @@ func (r *CommentRepository) Search(ctx context.Context, qe pgxdriver.QueryExecut
 	}
 
 	var total int64
-	if err := qe.QueryRow(ctx, query, args...).Scan(&total); err != nil {
+	if err := executor.QueryRow(ctx, query, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("%s: count: %w", op, err)
 	}
 
