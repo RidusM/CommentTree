@@ -7,7 +7,7 @@ import (
 	"github.com/wb-go/wbf/logger"
 )
 
-func (h *TreeHandler) requestIDMiddleware() gin.HandlerFunc {
+func (h *CommentHandler) requestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := logger.GenerateRequestID()
 		ctx := logger.SetRequestID(c.Request.Context(), requestID)
@@ -17,7 +17,7 @@ func (h *TreeHandler) requestIDMiddleware() gin.HandlerFunc {
 	}
 }
 
-func (h *TreeHandler) loggingMiddleware() gin.HandlerFunc {
+func (h *CommentHandler) loggingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()

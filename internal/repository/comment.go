@@ -88,46 +88,54 @@ func (r *CommentRepository) GetByID(ctx context.Context, qe pgxdriver.QueryExecu
 }
 
 func (r *CommentRepository) GetChildren(ctx context.Context, qe pgxdriver.QueryExecuter, parentPath string, limit, offset int) ([]entity.Comment, error) {
-	const op = "repository.comment.GetChildren"
-
 	executor := execOrDB(qe, r.db)
 
 	selectQuery := r.db.Select("id", "parent_id", "author", "content", "is_deleted", "path", "depth").
 		From("comments").
-		Where(squirrel.Like{"path": parentPath + "%s"}).
-		Where(squirrel.Eq{"id_deleted": false}).
+		Where(squirrel.Like{"path": parentPath + "%"}).
+		Where(squirrel.Eq{"is_deleted": false}).
 		OrderBy("path ASC").
 		Limit(uint64(limit)).
 		Offset(uint64(offset))
 
 	query, args, err := selectQuery.ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("%s: select query: %w", op, err)
+		return nil, fmt.Errorf("build select query: %w", err)
 	}
 
 	rows, err := executor.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
+		return nil, fmt.Errorf("query children: %w", err)
 	}
 	defer rows.Close()
 
-	comments := make([]entity.Comment, 0)
+	var comments []entity.Comment
 	for rows.Next() {
-		var comment entity.Comment
-		if err := rows.Scan(
-			&comment.ID,
-			&comment.ParentID,
-			&comment.Author,
-			&comment.Content,
-			&comment.IsDeleted,
-			&comment.Path,
-			&comment.Depth,
-		); err != nil {
-			return nil, fmt.Errorf("%s: scan: %w", op, err)
+		var c entity.Comment
+		if err := rows.Scan(&c.ID, &c.ParentID, &c.Author, &c.Content, &c.IsDeleted, &c.Path, &c.Depth); err != nil {
+			return nil, fmt.Errorf("scan child: %w", err)
 		}
-		comments = append(comments, comment)
+		comments = append(comments, c)
 	}
 	return comments, nil
+}
+
+func (r *CommentRepository) SoftDelete(ctx context.Context, qe pgxdriver.QueryExecuter, path string) error {
+	executor := execOrDB(qe, r.db)
+
+	update := r.db.Update("comments").
+		Set("is_deleted", true).
+		Where(squirrel.Like{"path": path + "%"})
+
+	query, args, err := update.ToSql()
+	if err != nil {
+		return fmt.Errorf("build update query: %w", err)
+	}
+
+	if _, err := executor.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("soft delete: %w", err)
+	}
+	return nil
 }
 func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.QueryExecuter, limit, offset int) ([]entity.Comment, int64, error) {
 	const op = "repository.comment.GetRootComments"
@@ -185,26 +193,7 @@ func (r *CommentRepository) GetRootComments(ctx context.Context, qe pgxdriver.Qu
 
 	return comments, total, nil
 }
-func (r *CommentRepository) SoftDelete(ctx context.Context, qe pgxdriver.QueryExecuter, path string) error {
-	const op = "repository.comment.SoftDelete"
 
-	executor := execOrDB(qe, r.db)
-
-	update := r.db.Update("comments").
-		Set("is_deleted", true).
-		Where(squirrel.Eq{"path": path + "%"})
-
-	query, args, err := update.ToSql()
-	if err != nil {
-		return fmt.Errorf("%s: update query: %w", op, err)
-	}
-
-	if _, err := executor.Exec(ctx, query, args...); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	return nil
-}
 func (r *CommentRepository) Search(ctx context.Context, qe pgxdriver.QueryExecuter, searchQuery string, limit, offset int) ([]entity.Comment, int64, error) {
 	const op = "repository.comment.Search"
 

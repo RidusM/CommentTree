@@ -60,9 +60,9 @@ type (
 	}
 
 	CreateCommentRequest struct {
-		ParentID *uuid.UUID `json:"parent_id,omitempty"`
-		Author   string     `json:"author"`
-		Content  string     `json:"content"`
+		ParentID *uuid.UUID
+		Author   string
+		Content  string
 	}
 
 	GetCommentsRequest struct {
@@ -103,12 +103,15 @@ func NewCommentService(
 }
 
 func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentRequest) (*entity.Comment, error) {
-	const op = "service.CommentService.CreateComment"
+	const op = "service.CreateComment"
 
 	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
 
-	defer s.logSlowOperation(ctx, op, startTime, logger.Bool("has_parent", req.ParentID != nil), logger.String("author", req.Author))
+	defer s.logSlowOperation(ctx, op, startTime, 
+		logger.Bool("has_parent", req.ParentID != nil), 
+		logger.String("author", req.Author),
+	)
 
 	log.LogAttrs(ctx, logger.InfoLevel, "create comment started",
 		logger.String("author", req.Author),
@@ -181,13 +184,7 @@ func (s *CommentService) CreateComment(ctx context.Context, req CreateCommentReq
 }
 
 func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest) (*entity.CommentListResult, error) {
-	const op = "service.CommentService.GetComments"
-
-	log := s.log.Ctx(ctx).With("op", op)
-	startTime := time.Now()
-
-	defer s.logSlowOperation(ctx, op, startTime, logger.Bool("has_parent", req.ParentID != nil), logger.Int("page", req.Page))
-
+	const op = "service.GetComments"
 	if req.PageSize <= 0 {
 		req.PageSize = s.defaultPageSize
 	}
@@ -198,29 +195,19 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 		req.Page = 1
 	}
 
-	cached, err := s.cache.GetCommentTree(ctx, req.ParentID, req.Page, req.PageSize)
-	if err == nil && cached != nil {
-		log.LogAttrs(ctx, logger.InfoLevel, "served from cache")
-		return cached, nil
-	}
-
 	var result *entity.CommentListResult
-	err = s.tm.ExecuteInTransaction(ctx, "get_comments", func(tx pgxdriver.QueryExecuter) error {
+	err := s.tm.ExecuteInTransaction(ctx, "get_comments", func(tx pgxdriver.QueryExecuter) error {
 		offset := (req.Page - 1) * req.PageSize
 
 		if req.ParentID == nil {
-			comments, total, err := s.repo.GetRootComments(ctx, tx, req.PageSize+1, offset)
+			roots, total, err := s.repo.GetRootComments(ctx, tx, req.PageSize, offset)
 			if err != nil {
 				return fmt.Errorf("get root comments: %w", err)
 			}
 
-			trees := make([]entity.CommentTree, 0, len(comments))
-			for _, comment := range comments {
-				if len(trees) >= req.PageSize {
-					break
-				}
-
-				tree, err := s.buildTree(ctx, tx, comment)
+			trees := make([]entity.CommentTree, 0, len(roots))
+			for _, root := range roots {
+				tree, err := s.buildTree(ctx, tx, root)
 				if err != nil {
 					return fmt.Errorf("build tree: %w", err)
 				}
@@ -228,6 +215,7 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 			}
 
 			totalPages := int((total + int64(req.PageSize) - 1) / int64(req.PageSize))
+			if totalPages == 0 && total > 0 { totalPages = 1 }
 
 			result = &entity.CommentListResult{
 				Comments:   trees,
@@ -258,29 +246,17 @@ func (s *CommentService) GetComments(ctx context.Context, req GetCommentsRequest
 				TotalPages: 1,
 			}
 		}
-
 		return nil
 	})
 
 	if err != nil {
-		log.LogAttrs(ctx, logger.ErrorLevel, "get comments failed",
-			logger.Any("error", err),
-		)
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-
-	_ = s.cache.SaveCommentTree(ctx, req.ParentID, req.Page, req.PageSize, result)
-
-	log.LogAttrs(ctx, logger.InfoLevel, "comments retrieved",
-		logger.Int("count", len(result.Comments)),
-		logger.Duration("duration", time.Since(startTime)),
-	)
-
 	return result, nil
 }
 
 func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error {
-	const op = "service.CommentService.DeleteComment"
+	const op = "service.DeleteComment"
 
 	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
@@ -330,7 +306,7 @@ func (s *CommentService) DeleteComment(ctx context.Context, id uuid.UUID) error 
 }
 
 func (s *CommentService) SearchComments(ctx context.Context, req SearchRequest) (*entity.SearchResult, error) {
-	const op = "service.CommentService.SearchComments"
+	const op = "service.SearchComments"
 
 	log := s.log.Ctx(ctx).With("op", op)
 	startTime := time.Now()
@@ -384,30 +360,40 @@ func (s *CommentService) SearchComments(ctx context.Context, req SearchRequest) 
 	return result, nil
 }
 
-func (s *CommentService) buildTree(ctx context.Context, tx pgxdriver.QueryExecuter, comment entity.Comment) (entity.CommentTree, error) {
+func (s *CommentService) buildTree(ctx context.Context, tx pgxdriver.QueryExecuter, root entity.Comment) (entity.CommentTree, error) {
 	tree := entity.CommentTree{
-		Comment:  comment,
+		Comment:  root,
 		Children: make([]entity.CommentTree, 0),
 	}
 
-	children, err := s.repo.GetChildren(ctx, tx, comment.Path+"/", 1000, 0)
+	children, err := s.repo.GetChildren(ctx, tx, root.Path+"/", 10000, 0)
 	if err != nil {
 		return tree, fmt.Errorf("get children: %w", err)
 	}
 
-	directChildren := make([]entity.Comment, 0)
-	for _, child := range children {
-		if child.Depth == comment.Depth+1 {
-			directChildren = append(directChildren, child)
-		}
+	if len(children) == 0 {
+		return tree, nil
 	}
 
-	for _, child := range directChildren {
-		subtree, err := s.buildTree(ctx, tx, child)
-		if err != nil {
-			return tree, err
+	nodes := make(map[uuid.UUID]*entity.CommentTree, len(children)+1)
+	nodes[root.ID] = &tree
+
+	for _, child := range children {
+		if child.IsDeleted {
+			continue
 		}
-		tree.Children = append(tree.Children, subtree)
+
+		node := &entity.CommentTree{
+			Comment:  child,
+			Children: make([]entity.CommentTree, 0),
+		}
+		nodes[child.ID] = node
+
+		if child.ParentID != nil {
+			if parent, ok := nodes[*child.ParentID]; ok {
+				parent.Children = append(parent.Children, *node)
+			}
+		}
 	}
 
 	return tree, nil

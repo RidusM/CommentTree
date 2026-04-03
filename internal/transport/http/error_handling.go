@@ -9,7 +9,7 @@ import (
 	"github.com/wb-go/wbf/logger"
 )
 
-func (h *TreeHandler) handleServiceError(c *gin.Context, op string, err error) {
+func (h *CommentHandler) handleServiceError(c *gin.Context, op string, err error) {
 	ctx := c.Request.Context()
 	log := h.log.Ctx(ctx).With("op", op, "error", err)
 

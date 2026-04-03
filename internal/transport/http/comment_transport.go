@@ -2,6 +2,7 @@ package handler
 
 import (
 	"comtree/internal/entity"
+	"comtree/internal/service"
 	"context"
 
 	"github.com/gin-gonic/gin"
@@ -9,44 +10,37 @@ import (
 	"github.com/wb-go/wbf/logger"
 )
 
-type NotifyService interface {
-	CreateComment(ctx context.Context, req CreateCommentRequest) (*entity.Comment, error)
-	GetComments(ctx context.Context, req CreateCommentRequest) (*entity.CommentListResult, error)
+type CommentService interface {
+	CreateComment(ctx context.Context, req service.CreateCommentRequest) (*entity.Comment, error)
+	GetComments(ctx context.Context, req service.GetCommentsRequest) (*entity.CommentListResult, error)
 	DeleteComment(ctx context.Context, id uuid.UUID) error
-	SearchComments(ctx context.Context, req ) (*entity.SearchResult, error)
+	SearchComments(ctx context.Context, req service.SearchRequest) (*entity.SearchResult, error)
 }
 
-type NotifyHandler struct {
-	svc    *service.NotifyService
+type CommentHandler struct {
+	svc    CommentService
 	log    logger.Logger
 	router *gin.Engine
 }
 
-func NewNotifyHandler(
-	svc *service.NotifyService,
-	log logger.Logger,
-) *NotifyHandler {
-	h := &NotifyHandler{
-		svc: svc,
-		log: log,
+func NewCommentHandler(svc CommentService, log logger.Logger) *CommentHandler {
+	h := &CommentHandler{
+		svc:    svc,
+		log:    log,
+		router: gin.New(),
 	}
 
-	router := gin.New()
-
-	router.Use(h.requestIDMiddleware())
-	router.Use(h.loggingMiddleware())
-	router.Use(gin.Recovery())
-
-	h.router = router
+	h.router.Use(h.requestIDMiddleware())
+	h.router.Use(h.loggingMiddleware())
+	h.router.Use(gin.Recovery())
+	h.router.Use(gin.ErrorLogger())
 
 	h.router.LoadHTMLGlob("web/*.html")
 	h.router.Static("/static", "./web")
 
 	h.setupRoutes()
-
 	return h
 }
 
-func (h *NotifyHandler) Engine() *gin.Engine {
-	return h.router
-}
+
+func (h *CommentHandler) Engine() *gin.Engine { return h.router }

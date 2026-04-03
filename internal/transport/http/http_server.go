@@ -22,7 +22,7 @@ type HTTPServer struct {
 }
 
 func NewHTTPServer(
-	handler *TreeHandler,
+	handler *CommentHandler,
 	cfg *config.HTTP,
 	log logger.Logger,
 ) (*HTTPServer, error) {

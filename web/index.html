@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comment Tree</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+        .comment { border-left: 3px solid #ccc; padding: 0.5rem 0 0.5rem 1rem; margin: 0.5rem 0; }
+        .comment.level-0 { border-left-color: #4f46e5; }
+        .comment.level-1 { border-left-color: #0ea5e9; }
+        .comment.level-2 { border-left-color: #10b981; }
+        .comment.level-3 { border-left-color: #f59e0b; }
+        .meta { font-size: 0.8rem; color: #666; margin-bottom: 0.2rem; }
+        .deleted { opacity: 0.5; font-style: italic; }
+        .actions { margin-top: 0.3rem; }
+        .actions button { cursor: pointer; padding: 2px 6px; margin-right: 5px; font-size: 0.8rem; }
+        #search-bar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+        input, textarea, button { padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #4f46e5; color: white; border: none; cursor: pointer; }
+        button:hover { opacity: 0.9; }
+        .reply-form { background: #f9fafb; padding: 0.5rem; margin-top: 0.5rem; display: none; }
+        .reply-form textarea { width: 100%; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <h1>🌳 Comment Tree</h1>
+    <div id="search-bar">
+        <input type="text" id="searchInput" placeholder="Поиск по комментариям..." style="flex:1;">
+        <button onclick="searchComments()">Найти</button>
+        <button onclick="loadComments()">Сброс</button>
+    </div>
+
+    <details style="margin-bottom: 1.5rem;">
+        <summary>➕ Добавить комментарий</summary>
+        <form id="createForm" style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
+            <input type="text" id="author" placeholder="Ваше имя" required>
+            <textarea id="content" placeholder="Текст комментария..." required></textarea>
+            <button type="submit">Отправить</button>
+        </form>
+    </details>
+
+    <div id="comments"></div>
+
+    <script>
+        const API = '/comments';
+        
+        async function loadComments(parentId = null) {
+            const url = parentId ? `${API}?parent_id=${parentId}` : API;
+            const res = await fetch(url);
+            const data = await res.json();
+            renderTree(data.comments || []);
+        }
+
+        async function searchComments() {
+            const q = document.getElementById('searchInput').value.trim();
+            if (!q) return loadComments();
+            const res = await fetch(`/comments/search?q=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            renderFlatList(data.comments || []);
+        }
+
+        function renderTree(nodes) {
+            const container = document.getElementById('comments');
+            container.innerHTML = nodes.length ? '' : '<p>Комментариев нет.</p>';
+            nodes.forEach(node => appendComment(container, node, 0));
+        }
+
+        function renderFlatList(nodes) {
+            const container = document.getElementById('comments');
+            container.innerHTML = nodes.length ? '' : '<p>Ничего не найдено.</p>';
+            nodes.forEach(c => appendComment(container, { comment: c, children: [] }, 0));
+        }
+
+        function appendComment(parent, node, depth) {
+            const c = node.comment;
+            const div = document.createElement('div');
+            div.className = `comment level-${Math.min(depth, 3)} ${c.is_deleted ? 'deleted' : ''}`;
+            div.innerHTML = `
+                <div class="meta"><strong>${escapeHtml(c.author)}</strong> • ${new Date(c.created_at).toLocaleString()}</div>
+                <div>${escapeHtml(c.content)}</div>
+                <div class="actions">
+                    ${!c.is_deleted ? `<button onclick="toggleReply('${c.id}')">Ответить</button>` : ''}
+                    <button onclick="deleteComment('${c.id}')" style="background:#ef4444">Удалить</button>
+                </div>
+                <div class="reply-form" id="reply-${c.id}">
+                    <textarea id="reply-text-${c.id}" placeholder="Ваш ответ..."></textarea>
+                    <button onclick="submitReply('${c.id}')">Отправить ответ</button>
+                </div>
+            `;
+            parent.appendChild(div);
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => appendComment(div, child, depth + 1));
+            }
+        }
+
+        function toggleReply(id) {
+            const form = document.getElementById(`reply-${id}`);
+            form.style.display = form.style.display === 'block' ? 'none' : 'block';
+        }
+
+        async function submitReply(parentId) {
+            const content = document.getElementById(`reply-text-${parentId}`).value.trim();
+            if (!content) return;
+            await postComment(parentId, content);
+            document.getElementById(`reply-${parentId}`).style.display = 'none';
+            loadComments();
+        }
+
+        document.getElementById('createForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const author = document.getElementById('author').value.trim();
+            const content = document.getElementById('content').value.trim();
+            if (!author || !content) return;
+            await postComment(null, content, author);
+            document.getElementById('content').value = '';
+            loadComments();
+        };
+
+        async function postComment(parentId, content, author = null) {
+            const body = { content };
+            if (parentId) body.parent_id = parentId;
+            if (author) body.author = author;
+            
+            await fetch(API, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+        }
+
+        async function deleteComment(id) {
+            if (!confirm('Удалить комментарий и все ответы?')) return;
+            await fetch(`${API}/${id}`, { method: 'DELETE' });
+            loadComments();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

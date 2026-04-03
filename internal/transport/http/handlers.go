@@ -1,185 +1,150 @@
-// nolint: revive,staticcheck
 package handler
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
-
-	"delayednotifier/internal/entity"
-	"delayednotifier/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"comtree/internal/entity"
+	"comtree/internal/service"
 )
 
-// @Summary Создать уведомление
-// @Description Планирует отправку уведомления на указанное время
-// @Tags Notification
-// @Accept json
-// @Produce json
-// @Param request body CreateNotificationRequest true "Данные уведомления"
-// @Success 201 {object} CreateNotificationResponse "Уведомление создано"
-// @Failure 400 {object} ErrorResponse "Ошибка валидации"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка"
-// @Router /notify [post]
-func (h *TreeHandler) CreateNotification(c *gin.Context) {
-	const op = "transport.http.NotifyHandler.CreateNotification"
-	ctx := c.Request.Context()
-
-	var req CreateNotificationRequest
+func (h *CommentHandler) CreateComment(c *gin.Context) {
+	var req service.CreateCommentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.respondError(c, http.StatusBadRequest, "invalid_request", "Invalid JSON format", err)
+		h.respondError(c, http.StatusBadRequest, "invalid_json", "Invalid request payload", err)
 		return
 	}
 
-	channel := entity.Channel(req.Channel)
-	if !isValidChannel(channel) {
-		h.respondError(c, http.StatusBadRequest, "invalid_channel",
-			"Channel must be one of: telegram, email", nil)
-		return
+	// Нормализация nil UUID
+	if req.ParentID != nil && *req.ParentID == uuid.Nil {
+		req.ParentID = nil
 	}
 
-	if req.Recipient == "" {
-		h.respondError(c, http.StatusBadRequest, "invalid_recipient",
-			"Recipient is required", nil)
-		return
-	}
-
-	if req.ScheduledAt.IsZero() {
-		h.respondError(c, http.StatusBadRequest, "invalid_scheduled_at", "Scheduled time is required", nil)
-		return
-	}
-
-	if req.ScheduledAt.Before(time.Now().UTC()) {
-		h.respondError(c, http.StatusBadRequest, "invalid_scheduled_at",
-			"Scheduled time must be in the future", nil)
-		return
-	}
-
-	serviceReq := service.CreateNotificationRequest{
-		Channel:     channel,
-		Payload:     req.Payload,
-		Recipient:   req.Recipient,
-		ScheduledAt: req.ScheduledAt,
-	}
-
-	notificationID, err := h.svc.Create(ctx, serviceReq)
+	comment, err := h.svc.CreateComment(c.Request.Context(), req)
 	if err != nil {
-		h.handleServiceError(c, op, err)
+		h.handleServiceError(c, "handler.CreateComment", err)
 		return
 	}
 
-	response := CreateNotificationResponse{
-		ID:          notificationID,
-		Channel:     req.Channel,
-		Recipient:   req.Recipient,
-		Payload:     req.Payload,
-		ScheduledAt: req.ScheduledAt,
-		Message:     "Notification created successfully",
-	}
-
-	c.Header("Location", fmt.Sprintf("/notify/%s", notificationID))
-	h.respondJSON(c, http.StatusCreated, response)
+	c.Header("Location", "/comments/"+comment.ID.String())
+	h.respondJSON(c, http.StatusCreated, toCommentResponse(*comment))
 }
 
-// @Summary Получить статус уведомления
-// @Description Возвращает статус уведомления по уникальному идентификатору
-// @Tags Notification
-// @Accept json
-// @Produce json
-// @Param id path string true "Уникальный идентификатор уведомления"
-// @Success 200 {object} NotificationStatusResponse "Успешный ответ с статусом уведомления"
-// @Failure 400 {object} ErrorResponse "Неверный формат notify_id"
-// @Failure 404 {object} ErrorResponse "Уведомление не найдено"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка сервера"
-// @Router /notify/{id} [get]
-func (h *NotifyHandler) GetStatus(c *gin.Context) {
-	const op = "transport.http.NotifyHandler.GetStatus"
-	ctx := c.Request.Context()
+func (h *CommentHandler) GetComments(c *gin.Context) {
+	var req service.GetCommentsRequest
+	req.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	req.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	idStr := c.Param("id")
-	id, err := uuid.Parse(idStr)
+	if pid := c.Query("parent_id"); pid != "" {
+		id, err := uuid.Parse(pid)
+		if err != nil {
+			h.respondError(c, http.StatusBadRequest, "invalid_uuid", "Invalid parent_id", err)
+			return
+		}
+		req.ParentID = &id
+	}
+
+	result, err := h.svc.GetComments(c.Request.Context(), req)
 	if err != nil {
-		h.respondError(c, http.StatusBadRequest, "invalid_id", "Invalid notification ID format", err)
+		h.handleServiceError(c, "handler.GetComments", err)
 		return
 	}
 
-	notification, err := h.svc.GetStatus(ctx, id)
+	resp := CommentListResponse{
+		Comments:   make([]CommentTreeResponse, len(result.Comments)),
+		TotalCount: result.TotalCount,
+		Page:       result.Page,
+		PageSize:   result.PageSize,
+		TotalPages: result.TotalPages,
+	}
+	for i, ct := range result.Comments {
+		resp.Comments[i] = toCommentTreeResponse(ct)
+	}
+
+	h.respondJSON(c, http.StatusOK, resp)
+}
+
+func (h *CommentHandler) DeleteComment(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		h.handleServiceError(c, op, err)
+		h.respondError(c, http.StatusBadRequest, "invalid_uuid", "Invalid comment ID", err)
 		return
 	}
 
-	response := NotificationStatusResponse{
-		ID:          notification.ID.String(),
-		UserID:      notification.UserID.String(),
-		Channel:     string(notification.Channel),
-		Status:      notification.Status.String(),
-		Payload:     notification.Payload,
-		ScheduledAt: notification.ScheduledAt,
-		SentAt:      notification.SentAt,
-		RetryCount:  notification.RetryCount,
-		LastError:   nullableString(notification.LastError),
-		CreatedAt:   notification.CreatedAt,
-	}
-
-	h.respondJSON(c, http.StatusOK, response)
-}
-
-// @Summary Отменить уведомление
-// @Description Отменяет запланированное уведомление
-// @Tags Notification
-// @Accept json
-// @Produce json
-// @Param id path string true "Уникальный идентификатор уведомления"
-// @Success 200 {object} SuccessResponse "Успешный ответ"
-// @Failure 400 {object} ErrorResponse "Неверный формат notify_id"
-// @Failure 404 {object} ErrorResponse "Уведомление не найдено"
-// @Failure 409 {object} ErrorResponse "Уведомление уже отправлено или отменено"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка сервера"
-// @Router /notify/{id} [delete]
-func (h *NotifyHandler) Cancel(c *gin.Context) {
-	const op = "transport.http.NotifyHandler.Cancel"
-	ctx := c.Request.Context()
-
-	idStr := c.Param("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		h.respondError(c, http.StatusBadRequest, "invalid_id", "Invalid notification ID format", err)
+	if err := h.svc.DeleteComment(c.Request.Context(), id); err != nil {
+		if errors.Is(err, service.ErrCommentNotFound) {
+			h.respondError(c, http.StatusNotFound, "not_found", "Comment not found", err)
+			return
+		}
+		h.handleServiceError(c, "handler.DeleteComment", err)
 		return
 	}
 
-	if cancelErr := h.svc.Cancel(ctx, id); cancelErr != nil {
-		h.handleServiceError(c, op, cancelErr)
+	h.respondJSON(c, http.StatusOK, SuccessResponse{Message: "Comment deleted"})
+}
+
+func (h *CommentHandler) SearchComments(c *gin.Context) {
+	q := c.Query("q")
+	if q == "" {
+		h.respondError(c, http.StatusBadRequest, "empty_query", "Search query is required", nil)
 		return
 	}
 
-	response := SuccessResponse{
-		Message: "Notification cancelled successfully",
+	req := service.SearchRequest{
+		Query:    q,
+		Page:     1,
+		PageSize: 20,
 	}
-	h.respondJSON(c, http.StatusOK, response)
-}
+	req.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	req.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-func (h *NotifyHandler) Health(c *gin.Context) {
-	response := map[string]string{
-		"status": "ok",
-		"time":   time.Now().Format(time.RFC3339),
-	}
-	h.respondJSON(c, http.StatusOK, response)
-}
-
-func (h *NotifyHandler) respondJSON(c *gin.Context, status int, data any) {
-	c.JSON(status, data)
-}
-
-func (h *NotifyHandler) respondError(c *gin.Context, status int, code, message string, err error) {
-	response := ErrorResponse{
-		Error: message,
-		Code:  code,
-	}
+	result, err := h.svc.SearchComments(c.Request.Context(), req)
 	if err != nil {
-		response.Details = err.Error()
+		h.handleServiceError(c, "handler.SearchComments", err)
+		return
 	}
-	h.respondJSON(c, status, response)
+
+	resp := SearchResponse{
+		Comments:   make([]CommentResponse, len(result.Comments)),
+		TotalCount: result.TotalCount,
+		Query:      result.Query,
+	}
+	for i, cm := range result.Comments {
+		resp.Comments[i] = toCommentResponse(cm)
+	}
+
+	h.respondJSON(c, http.StatusOK, resp)
+}
+
+func (h *CommentHandler) Health(c *gin.Context) {
+	h.respondJSON(c, http.StatusOK, map[string]string{"status": "ok", "time": time.Now().Format(time.RFC3339)})
+}
+
+// --- Мапперы ---
+func toCommentResponse(c entity.Comment) CommentResponse {
+	return CommentResponse{
+		ID:        c.ID,
+		ParentID:  c.ParentID,
+		Author:    c.Author,
+		Content:   c.Content,
+		IsDeleted: c.IsDeleted,
+		Depth:     c.Depth,
+		CreatedAt: c.CreatedAt(),
+	}
+}
+
+func toCommentTreeResponse(ct entity.CommentTree) CommentTreeResponse {
+	resp := CommentTreeResponse{
+		Comment:  toCommentResponse(ct.Comment),
+		Children: make([]CommentTreeResponse, len(ct.Children)),
+	}
+	for i, child := range ct.Children {
+		resp.Children[i] = toCommentTreeResponse(child)
+	}
+	return resp
 }

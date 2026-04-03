@@ -31,8 +31,10 @@ func (r *CacheRepository) cacheKeyComment(id uuid.UUID) string {
 	return _commentPrefix + id.String()
 }
 
-func (r *CacheRepository) cacheKeyTree(id uuid.UUID) string {
-	return _commentTreePrefix + id.String()
+func (r *CacheRepository) cacheKeyTree(parentID *uuid.UUID, page, pageSize int) string {
+    pid := "root"
+    if parentID != nil { pid = parentID.String() }
+    return fmt.Sprintf("tree:%s:p%d_s%d", pid, page, pageSize)
 }
 
 func (r *CacheRepository) GetComment(ctx context.Context, id uuid.UUID) (*entity.Comment, error) {
@@ -79,10 +81,10 @@ func (r *CacheRepository) InvalidateComment(ctx context.Context, id uuid.UUID) e
 	return nil
 }
 
-func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID uuid.UUID, page, pageSize int) (*entity.CommentListResult, error) {
+func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int) (*entity.CommentListResult, error) {
 	const op = "repository.cache.GetCommentTree"
 
-	cached, err := r.rdb.Get(ctx, r.cacheKeyTree(parentID))
+	cached, err := r.rdb.Get(ctx, r.cacheKeyTree(parentID, page, pageSize))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
@@ -95,7 +97,7 @@ func (r *CacheRepository) GetCommentTree(ctx context.Context, parentID uuid.UUID
 	return &result, nil
 }
 
-func (r *CacheRepository) SaveCommentTree(ctx context.Context, parentID uuid.UUID, page, pageSize int, result *entity.CommentListResult) error {
+func (r *CacheRepository) SaveCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int, result *entity.CommentListResult) error {
 	const op = "repository.cache.SaveCommentTree"
 
 	data, err := json.Marshal(result)
@@ -103,7 +105,7 @@ func (r *CacheRepository) SaveCommentTree(ctx context.Context, parentID uuid.UUI
 		return fmt.Errorf("%s: marshal: %w", op, err)
 	}
 
-	if err := r.rdb.SetWithExpiration(ctx, r.cacheKeyTree(parentID), data, _cacheTTL); err != nil {
+	if err := r.rdb.SetWithExpiration(ctx, r.cacheKeyTree(parentID, page, pageSize), data, _cacheTTL); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 

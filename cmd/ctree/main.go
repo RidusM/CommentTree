@@ -1,6 +1,7 @@
 package main
 
 import (
+	"comtree/internal/config"
 	"context"
 	"errors"
 	"fmt"

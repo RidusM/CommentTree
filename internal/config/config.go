@@ -25,7 +25,7 @@ type (
 	}
 
 	Database struct {
-		DSN            string        `env:"DSN"              env-default:"postgres://user:pass@localhost:5432/ctree?sslmode=disable" validate:"required"`
+		DSN            string        `env:"DSN"              env-default:"postgres://user:pass@localhost:5432/delayed_notifier?sslmode=disable" validate:"required"`
 		PoolMax        int32         `env:"POOL_MAX"         env-default:"20"                                                                   validate:"min=1,max=100"`
 		ConnAttempts   int           `env:"CONN_ATTEMPTS"    env-default:"5"                                                                    validate:"min=1,max=10"`
 		BaseRetryDelay time.Duration `env:"BASE_RETRY_DELAY" env-default:"100ms"                                                                validate:"gte=10ms,lte=10s"`
@@ -33,12 +33,13 @@ type (
 	}
 
 	Cache struct {
-		Addr        string        `env:"ADDR"          env-default:"localhost:6379" validate:"required"`
-		Password    string        `env:"PASSWORD"      env-default:""`
-		PoolSize    int           `env:"POOL_SIZE"     env-default:"20"             validate:"min=1,max=100"`
-		MinIdleCons int           `env:"MIN_IDLE_CONS" env-default:"10"             validate:"min=1,max=100"`
-		PoolTimeout time.Duration `env:"POOL_TIMEOUT"  env-default:"4s"             validate:"gte=10ms,lte=10s"`
-		TTL         time.Duration `env:"TTL" env-default:"60s" validate:"gte=1s, lte=300s"`
+		Addr         string        `env:"ADDR"          env-default:"localhost:6379" validate:"required"`
+		Password     string        `env:"PASSWORD"      env-default:""`
+		DB           int           `env:"DB"            env-default:"0"              validate:"min=0,max=15"`
+		DialTimeout  time.Duration `env:"DIAL_TIMEOUT"  env-default:"5s"             validate:"gte=1s,lte=30s"`
+		ReadTimeout  time.Duration `env:"READ_TIMEOUT"  env-default:"3s"             validate:"gte=1s,lte=30s"`
+		WriteTimeout time.Duration `env:"WRITE_TIMEOUT" env-default:"3s"             validate:"gte=1s,lte=30s"`
+		PoolSize     int           `env:"POOL_SIZE"     env-default:"20"             validate:"min=1,max=100"`
 	}
 
 	HTTP struct {

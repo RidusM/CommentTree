@@ -13,13 +13,13 @@ const (
 )
 
 type Comment struct {
-	ID        uuid.UUID  `json:"id"                   validate:"required,uuid_strict"`
-	ParentID  *uuid.UUID `json:"parent_id"                   validate:"required,uuid_strict"`
-	Author    string     `json:"author" validate:"required"`
-	Content   string     `json:"content" validate:"required"`
-	IsDeleted bool       `json:"is_deleted" validate:"required"`
-	Path      string     `json:"path" validate:"required"`
-	Depth     int        `json:"depth" validate:"required,min=0,max=10"`
+	ID        uuid.UUID  `json:"id"        validate:"required,uuid"`
+	ParentID  *uuid.UUID `json:"parent_id" validate:"omitempty,uuid"`
+	Author    string     `json:"author"    validate:"required,min=1,max=100"`
+	Content   string     `json:"content"   validate:"required,min=1,max=5000"`
+	IsDeleted bool       `json:"is_deleted"`
+	Path      string     `json:"path"`
+	Depth     int        `json:"depth"     validate:"min=0,max=10"`
 }
 
 func (c *Comment) CreatedAt() time.Time {
