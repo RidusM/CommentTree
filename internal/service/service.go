@@ -41,7 +41,7 @@ type (
 
 	CacheRepository interface {
 		GetComment(ctx context.Context, id uuid.UUID) (*entity.Comment, error)
-		SetComment(ctx context.Context, comment *entity.Comment) error
+		SaveComment(ctx context.Context, comment *entity.Comment) error
 		InvalidateComment(ctx context.Context, id uuid.UUID) error
 		GetCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int) (*entity.CommentListResult, error)
 		SaveCommentTree(ctx context.Context, parentID *uuid.UUID, page, pageSize int, result *entity.CommentListResult) error

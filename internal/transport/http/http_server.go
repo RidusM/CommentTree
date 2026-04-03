@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/wb-go/wbf/logger"
@@ -25,7 +22,7 @@ func NewHTTPServer(
 	handler *CommentHandler,
 	cfg *config.HTTP,
 	log logger.Logger,
-) (*HTTPServer, error) {
+) *HTTPServer {
 	return &HTTPServer{
 		server: &http.Server{
 			Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
@@ -38,11 +35,11 @@ func NewHTTPServer(
 		},
 		shutdownTimeout: cfg.ShutdownTimeout,
 		log:             log,
-	}, nil
+	}
 }
 
 func (s *HTTPServer) Start(ctx context.Context) error {
-	const op = "transport.http.HTTPServer.Start"
+	const op = "transport.handler.HTTPServer.Start"
 
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -51,30 +48,18 @@ func (s *HTTPServer) Start(ctx context.Context) error {
 			logger.String("addr", s.server.Addr),
 		)
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.log.LogAttrs(ctx, logger.ErrorLevel, "HTTP server failed to start",
-				logger.Any("error", err),
-			)
-			return fmt.Errorf("%s: server listen and serve: %w", op, err)
+			return fmt.Errorf("%s: listen and serve: %w", op, err)
 		}
 		return nil
 	})
 
 	eg.Go(func() error {
-		stop := make(chan os.Signal, 1)
-		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case <-stop:
-			s.log.LogAttrs(ctx, logger.InfoLevel, "shutdown signal received",
-				logger.String("timeout", s.shutdownTimeout.String()),
-			)
-			return s.Stop(ctx)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-ctx.Done()
+		return s.Stop(context.Background())
 	})
 
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("%s: error group wait: %w", op, err)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
@@ -88,7 +73,7 @@ func (s *HTTPServer) Stop(ctx context.Context) error {
 		s.log.LogAttrs(ctx, logger.ErrorLevel, "HTTP server forced shutdown",
 			logger.Any("error", err),
 		)
-		return fmt.Errorf("transport.http.HTTPServer.Stop: server shutdown: %w", err)
+		return fmt.Errorf("transport.handler.HTTPServer.Stop: server shutdown: %w", err)
 	}
 	s.log.LogAttrs(ctx, logger.InfoLevel, "HTTP server stopped gracefully")
 	return nil
