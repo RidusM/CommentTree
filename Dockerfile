@@ -20,4 +20,4 @@ COPY --from=go-builder /app/web /web
 
 COPY --from=go-builder /app/bin/ctree /ctree
 
-ENTRYPOINT ["ctree"]
+ENTRYPOINT ["/ctree"]

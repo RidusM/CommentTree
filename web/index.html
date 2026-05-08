@@ -1,146 +1,705 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Comment Tree</title>
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-        .comment { border-left: 3px solid #ccc; padding: 0.5rem 0 0.5rem 1rem; margin: 0.5rem 0; }
-        .comment.level-0 { border-left-color: #4f46e5; }
-        .comment.level-1 { border-left-color: #0ea5e9; }
-        .comment.level-2 { border-left-color: #10b981; }
-        .comment.level-3 { border-left-color: #f59e0b; }
-        .meta { font-size: 0.8rem; color: #666; margin-bottom: 0.2rem; }
-        .deleted { opacity: 0.5; font-style: italic; }
-        .actions { margin-top: 0.3rem; }
-        .actions button { cursor: pointer; padding: 2px 6px; margin-right: 5px; font-size: 0.8rem; }
-        #search-bar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
-        input, textarea, button { padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
-        button { background: #4f46e5; color: white; border: none; cursor: pointer; }
-        button:hover { opacity: 0.9; }
-        .reply-form { background: #f9fafb; padding: 0.5rem; margin-top: 0.5rem; display: none; }
-        .reply-form textarea { width: 100%; box-sizing: border-box; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Комментарии</title>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg-secondary: #111827;
+      --card: rgba(17, 24, 39, 0.9);
+      --card-border: rgba(255,255,255,0.08);
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --danger: #ef4444;
+      --success-bg: rgba(34,197,94,0.15);
+      --success-text: #86efac;
+      --error-bg: rgba(239,68,68,0.15);
+      --error-text: #fca5a5;
+      --input: rgba(255,255,255,0.04);
+      --shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(59,130,246,0.18), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(168,85,247,0.14), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, rgba(59,130,246,0.22), rgba(168,85,247,0.18));
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(16px);
+      border-radius: 28px;
+      padding: 32px;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      width: 240px;
+      height: 240px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 50%;
+      top: -80px;
+      right: -80px;
+    }
+
+    .hero h1 {
+      position: relative;
+      margin: 0 0 12px;
+      font-size: 42px;
+      letter-spacing: -1px;
+    }
+
+    .hero p {
+      position: relative;
+      margin: 0;
+      max-width: 700px;
+      color: #d1d5db;
+      font-size: 17px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 22px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(16px);
+      border-radius: 26px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .card h2 {
+      margin-top: 0;
+      margin-bottom: 22px;
+      font-size: 24px;
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: var(--input);
+      color: white;
+      border-radius: 16px;
+      padding: 14px 16px;
+      font-size: 15px;
+      outline: none;
+      transition: 0.2s;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      border-color: rgba(59,130,246,0.7);
+      box-shadow: 0 0 0 4px rgba(59,130,246,0.18);
+    }
+
+    textarea {
+      min-height: 140px;
+      resize: vertical;
+    }
+
+    button {
+      border: none;
+      border-radius: 16px;
+      padding: 14px 18px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+    }
+
+    .primary-btn {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      box-shadow: 0 10px 24px rgba(37,99,235,0.35);
+    }
+
+    .primary-btn:hover {
+      background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    }
+
+    .danger-btn {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+    }
+
+    .comment {
+      margin-top: 18px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 22px;
+      padding: 18px;
+      transition: 0.2s;
+    }
+
+    .comment:hover {
+      border-color: rgba(59,130,246,0.25);
+      transform: translateY(-1px);
+    }
+
+    .comment-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .author {
+      font-size: 18px;
+      font-weight: 700;
+      color: white;
+    }
+
+    .meta {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .children {
+      margin-left: 24px;
+      margin-top: 18px;
+      border-left: 2px solid rgba(59,130,246,0.3);
+      padding-left: 16px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+      flex-wrap: wrap;
+    }
+
+    .status {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .success {
+      background: var(--success-bg);
+      color: var(--success-text);
+    }
+
+    .error {
+      background: var(--error-bg);
+      color: var(--error-text);
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      align-items: end;
+    }
+
+    .toolbar .field {
+      flex: 1;
+      min-width: 160px;
+      margin-bottom: 0;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 36px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .hint {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .pagination-info {
+      margin-top: 10px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .deleted {
+      color: #f87171;
+      font-weight: 700;
+      background: rgba(239,68,68,0.12);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    @media (max-width: 768px) {
+      .wrapper {
+        padding: 20px 14px 50px;
+      }
+
+      .hero {
+        padding: 24px;
+      }
+
+      .hero h1 {
+        font-size: 32px;
+      }
+
+      .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .children {
+        margin-left: 10px;
+        padding-left: 10px;
+      }
+    }
+  </style>
 </head>
 <body>
-    <h1>🌳 Comment Tree</h1>
-    <div id="search-bar">
-        <input type="text" id="searchInput" placeholder="Поиск по комментариям..." style="flex:1;">
-        <button onclick="searchComments()">Найти</button>
-        <button onclick="loadComments()">Сброс</button>
+  <div class="wrapper">
+    <div class="hero">
+      <h1>💬 Комментарии</h1>
+      <p>
+        Простая страница для просмотра, поиска и создания комментариев.
+      </p>
     </div>
 
-    <details style="margin-bottom: 1.5rem;">
-        <summary>➕ Добавить комментарий</summary>
-        <form id="createForm" style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
-            <input type="text" id="author" placeholder="Ваше имя" required>
-            <textarea id="content" placeholder="Текст комментария..." required></textarea>
-            <button type="submit">Отправить</button>
+    <div class="grid">
+      <div class="card">
+        <h2>✍️ Написать комментарий</h2>
+
+        <form id="commentForm">
+          <div class="field">
+            <label>Ваше имя</label>
+            <input type="text" id="author" placeholder="Например: Алексей" required />
+          </div>
+
+          <div class="field">
+            <label>Комментарий</label>
+            <textarea
+              id="content"
+              placeholder="Напишите что-нибудь..."
+              required
+            ></textarea>
+          </div>
+
+          <div class="field">
+            <label>ID родительского комментария</label>
+            <input
+              type="text"
+              id="parentId"
+              placeholder="Заполняется автоматически при ответе"
+            />
+            <div class="hint">
+              Можно оставить пустым для обычного комментария.
+            </div>
+          </div>
+
+          <button class="primary-btn" type="submit">
+            Отправить комментарий
+          </button>
         </form>
-    </details>
 
-    <div id="comments"></div>
+        <div id="formStatus"></div>
+      </div>
 
-    <script>
-        const API = '/comments';
-        
-        async function loadComments(parentId = null) {
-            const url = parentId ? `${API}?parent_id=${parentId}` : API;
-            const res = await fetch(url);
-            const data = await res.json();
-            renderTree(data.comments || []);
+      <div class="card">
+        <h2>🔎 Поиск</h2>
+
+        <div class="toolbar">
+          <div class="field">
+            <label>Что ищем?</label>
+            <input
+              type="text"
+              id="searchInput"
+              placeholder="Введите текст"
+            />
+          </div>
+
+          <div class="field">
+            <label>Страница</label>
+            <input type="number" id="searchPage" min="1" value="1" />
+          </div>
+
+          <div class="field">
+            <label>Комментариев на странице</label>
+            <select id="searchPageSize">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          <button class="primary-btn" id="searchBtn">
+            Найти
+          </button>
+        </div>
+
+        <div id="searchResults"></div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <div class="field">
+            <label>Страница</label>
+            <input type="number" id="pageInput" min="1" value="1" />
+          </div>
+
+          <div class="field">
+            <label>Комментариев на странице</label>
+            <select id="pageSizeInput">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          <button class="primary-btn" id="reloadBtn">
+            Обновить список
+          </button>
+        </div>
+
+        <div class="pagination-info" id="paginationInfo"></div>
+
+        <div id="commentsContainer"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:8080';
+
+    const commentsContainer = document.getElementById('commentsContainer');
+    const paginationInfo = document.getElementById('paginationInfo');
+    const commentForm = document.getElementById('commentForm');
+    const formStatus = document.getElementById('formStatus');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchResults = document.getElementById('searchResults');
+    const reloadBtn = document.getElementById('reloadBtn');
+
+    async function fetchComments() {
+      commentsContainer.innerHTML = '<p>Загрузка комментариев...</p>';
+
+      const page = document.getElementById('pageInput').value;
+      const pageSize = document.getElementById('pageSizeInput').value;
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/comments?page=${page}&page_size=${pageSize}`
+        );
+
+        if (!response.ok) {
+          throw new Error('Не удалось загрузить комментарии');
         }
 
-        async function searchComments() {
-            const q = document.getElementById('searchInput').value.trim();
-            if (!q) return loadComments();
-            const res = await fetch(`/comments/search?q=${encodeURIComponent(q)}`);
-            const data = await res.json();
-            renderFlatList(data.comments || []);
+        const data = await response.json();
+
+        paginationInfo.innerHTML = `
+          Показана страница <strong>${data.page}</strong>
+          из <strong>${data.total_pages}</strong>.
+          Всего комментариев: <strong>${data.total_count}</strong>
+        `;
+
+        if (!data.comments || data.comments.length === 0) {
+          commentsContainer.innerHTML = `
+            <div class="empty">
+              Комментариев пока нет 🙃
+            </div>
+          `;
+          return;
         }
 
-        function renderTree(nodes) {
-            const container = document.getElementById('comments');
-            container.innerHTML = nodes.length ? '' : '<p>Комментариев нет.</p>';
-            nodes.forEach(node => appendComment(container, node, 0));
+        commentsContainer.innerHTML = '';
+
+        data.comments.forEach(comment => {
+          commentsContainer.appendChild(renderComment(comment));
+        });
+      } catch (err) {
+        commentsContainer.innerHTML = `
+          <div class="status error">
+            ${err.message}
+          </div>
+        `;
+      }
+    }
+
+    function renderComment(node) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'comment';
+
+      const deletedBadge = node.comment.is_deleted
+        ? '<span class="deleted">Удалён</span>'
+        : '';
+
+      wrapper.innerHTML = `
+        <div class="comment-header">
+          <div>
+            <div class="author">
+              ${escapeHtml(node.comment.author)}
+            </div>
+
+            <div class="meta">
+              Уровень вложенности: ${node.comment.depth}
+            </div>
+          </div>
+
+          <div>${deletedBadge}</div>
+        </div>
+
+        <div>
+          ${escapeHtml(node.comment.content)}
+        </div>
+
+        <div class="meta" style="margin-top: 12px;">
+          ID: ${node.comment.id}
+        </div>
+
+        <div class="actions">
+          <button class="primary-btn reply-btn">
+            Ответить
+          </button>
+
+          <button class="danger-btn delete-btn">
+            Удалить
+          </button>
+        </div>
+      `;
+
+      const replyBtn = wrapper.querySelector('.reply-btn');
+      const deleteBtn = wrapper.querySelector('.delete-btn');
+
+      replyBtn.addEventListener('click', () => {
+        document.getElementById('parentId').value = node.comment.id;
+
+        document.getElementById('content').focus();
+
+        window.scrollTo({
+          top: 0,
+          behavior: 'smooth'
+        });
+      });
+
+      deleteBtn.addEventListener('click', async () => {
+        const confirmed = confirm(
+          'Удалить комментарий и все ответы на него?'
+        );
+
+        if (!confirmed) {
+          return;
         }
 
-        function renderFlatList(nodes) {
-            const container = document.getElementById('comments');
-            container.innerHTML = nodes.length ? '' : '<p>Ничего не найдено.</p>';
-            nodes.forEach(c => appendComment(container, { comment: c, children: [] }, 0));
-        }
-
-        function appendComment(parent, node, depth) {
-            const c = node.comment;
-            const div = document.createElement('div');
-            div.className = `comment level-${Math.min(depth, 3)} ${c.is_deleted ? 'deleted' : ''}`;
-            div.innerHTML = `
-                <div class="meta"><strong>${escapeHtml(c.author)}</strong> • ${new Date(c.created_at).toLocaleString()}</div>
-                <div>${escapeHtml(c.content)}</div>
-                <div class="actions">
-                    ${!c.is_deleted ? `<button onclick="toggleReply('${c.id}')">Ответить</button>` : ''}
-                    <button onclick="deleteComment('${c.id}')" style="background:#ef4444">Удалить</button>
-                </div>
-                <div class="reply-form" id="reply-${c.id}">
-                    <textarea id="reply-text-${c.id}" placeholder="Ваш ответ..."></textarea>
-                    <button onclick="submitReply('${c.id}')">Отправить ответ</button>
-                </div>
-            `;
-            parent.appendChild(div);
-
-            if (node.children && node.children.length > 0) {
-                node.children.forEach(child => appendComment(div, child, depth + 1));
+        try {
+          const response = await fetch(
+            `${API_BASE}/comments/${node.comment.id}`,
+            {
+              method: 'DELETE'
             }
+          );
+
+          if (!response.ok) {
+            throw new Error('Не удалось удалить комментарий');
+          }
+
+          fetchComments();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      if (node.children && node.children.length > 0) {
+        const children = document.createElement('div');
+        children.className = 'children';
+
+        node.children.forEach(child => {
+          children.appendChild(renderComment(child));
+        });
+
+        wrapper.appendChild(children);
+      }
+
+      return wrapper;
+    }
+
+    commentForm.addEventListener('submit', async event => {
+      event.preventDefault();
+
+      formStatus.innerHTML = '';
+
+      const payload = {
+        author: document.getElementById('author').value,
+        content: document.getElementById('content').value
+      };
+
+      const parentId = document.getElementById('parentId').value.trim();
+
+      if (parentId) {
+        payload.parent_id = parentId;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/comments`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Ошибка создания');
         }
 
-        function toggleReply(id) {
-            const form = document.getElementById(`reply-${id}`);
-            form.style.display = form.style.display === 'block' ? 'none' : 'block';
+        formStatus.innerHTML = `
+          <div class="status success">
+            ✅ Комментарий успешно отправлен
+          </div>
+        `;
+
+        commentForm.reset();
+
+        fetchComments();
+      } catch (err) {
+        formStatus.innerHTML = `
+          <div class="status error">
+            ${err.message}
+          </div>
+        `;
+      }
+    });
+
+    searchBtn.addEventListener('click', async () => {
+      const query = searchInput.value.trim();
+      const page = document.getElementById('searchPage').value;
+      const pageSize = document.getElementById('searchPageSize').value;
+
+      if (!query) {
+        searchResults.innerHTML = `
+          <div class="status error">
+            Введите текст для поиска
+          </div>
+        `;
+        return;
+      }
+
+      searchResults.innerHTML = '<p>Ищем комментарии...</p>';
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/comments/search?q=${encodeURIComponent(query)}&page=${page}&page_size=${pageSize}`
+        );
+
+        if (!response.ok) {
+          throw new Error('Ошибка поиска');
         }
 
-        async function submitReply(parentId) {
-            const content = document.getElementById(`reply-text-${parentId}`).value.trim();
-            if (!content) return;
-            await postComment(parentId, content);
-            document.getElementById(`reply-${parentId}`).style.display = 'none';
-            loadComments();
+        const data = await response.json();
+
+        if (!data.comments || data.comments.length === 0) {
+          searchResults.innerHTML = `
+            <div class="empty">
+              Ничего не найдено 😔
+            </div>
+          `;
+          return;
         }
 
-        document.getElementById('createForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const author = document.getElementById('author').value.trim();
-            const content = document.getElementById('content').value.trim();
-            if (!author || !content) return;
-            await postComment(null, content, author);
-            document.getElementById('content').value = '';
-            loadComments();
-        };
+        searchResults.innerHTML = `
+          <div class="pagination-info">
+            Найдено комментариев: <strong>${data.total_count}</strong>
+          </div>
+        `;
 
-        async function postComment(parentId, content, author = null) {
-            const body = { content };
-            if (parentId) body.parent_id = parentId;
-            if (author) body.author = author;
-            
-            await fetch(API, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body)
-            });
-        }
+        data.comments.forEach(comment => {
+          searchResults.innerHTML += `
+            <div class="comment">
+              <div class="author">
+                ${escapeHtml(comment.author)}
+              </div>
 
-        async function deleteComment(id) {
-            if (!confirm('Удалить комментарий и все ответы?')) return;
-            await fetch(`${API}/${id}`, { method: 'DELETE' });
-            loadComments();
-        }
+              <p>${escapeHtml(comment.content)}</p>
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-    </script>
+              <div class="meta">
+                ID: ${comment.id}
+              </div>
+            </div>
+          `;
+        });
+      } catch (err) {
+        searchResults.innerHTML = `
+          <div class="status error">
+            ${err.message}
+          </div>
+        `;
+      }
+    });
+
+    reloadBtn.addEventListener('click', fetchComments);
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.innerText = text;
+      return div.innerHTML;
+    }
+
+    fetchComments();
+  </script>
 </body>
 </html>

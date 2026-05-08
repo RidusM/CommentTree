@@ -1,10 +1,16 @@
-LOCAL_BIN := $(CURDIR)/bin
+PROJECT_NAME := ctree
+MAIN_PACKAGE := ./cmd/ctree
+BINARY_NAME := $(PROJECT_NAME)
+BINARY_PATH := ./bin/$(BINARY_NAME)
+
 BASE_STACK := docker compose -f docker-compose.yml
-INTEGRATION_TEST_STACK := docker compose --env-file .env -f tests/integration/docker-compose-integration-test.yml
-INTEGRATION_TEST_DIR := $(CURDIR)/tests/integration
-E2E_TEST_STACK := docker compose --env-file ../../.env -f tests/e2e/docker-compose-e2e.yml
-E2E_TEST_DIR := $(CURDIR)/tests/e2e
-ALL_STACK := $(BASE_STACK)
+INTEGRATION_STACK := docker compose --env-file "$(CURDIR)/.env" -f tests/integration/docker-compose-integration-test.yml
+
+INTEGRATION_TEST_DIR := .tests\integration
+
+GOBUILD := CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build
+GOTEST := go test -v -race
+GOCOVER := -covermode=atomic -coverprofile=coverage.txt
 
 .DEFAULT_GOAL := help
 
@@ -20,144 +26,192 @@ deps: ## Tidy and verify Go modules
 deps-audit: ## Check dependencies for vulnerabilities using govulncheck (govulncheck is must be required)
 	govulncheck ./...
 
-.PHONY: bin-deps
-bin-deps: ## Install development tools (govulncheck, golangci-lint, gci, gofumpt, etc.)
+.PHONY: run
+run: deps swagger ## Run the application locally (requires dependencies like DB/Rabbit to be running)
+	@echo "Running application..."
+	go run -tags migrate ./cmd/ctree -config=./configs/dev.env
+
+.PHONY: infra-up
+infra-up: ## Start infrastructure only (db, redis, rabbitmq) for local development
+	$(BASE_STACK) up -d db redis rabbitmq
+	@echo "Infrastructure started. Wait for healthchecks:"
+	$(BASE_STACK) logs -f db redis rabbitmq
+
+.PHONY: infra-down
+infra-down: ## Down infrastructure only (db, redis, rabbitmq) for local development
+	@echo "Stopping infrastructure..."
+	$(BASE_STACK) down db redis rabbitmq
+	@echo "Infrastructure stopped"
+
+.PHONY: infra-logs
+infra-logs: ## Show logs infrastructure only (db, redis, rabbitmq) for local cevelopment
+	@$(BASE_STACK) logs -f db redis rabbitmq
+
+.PHONY: compose-up
+compose-up: ## Run all services (infrastructure + app)
+	@echo "Starting all services..."
+	$(BASE_STACK) up --build -d
+	@echo "All services started"
+	$(BASE_STACK) logs -f app
+
+.PHONY: compose-down
+compose-down: ## Stop and remove all containers, networks, and volumes (from all stacks)
+	@echo "Stopping and cleaning"
+	$(BASE_STACK) down --remove-orphans --volumes
+	@echo "Cleanup completed"
+
+.PHONY: migrate-up
+migrate-up: ## Applied migrates to database
+	@echo "Running migrations..."
+	$(BASE_STACK) run --rm db-migrator
+	@echo "Migrations applied"
+
+.PHONY: migrate-down
+migrate-down: ## Rolling back migrations
+	@echo "Rolling back last migration..."
+	@$(BASE_STACK) run --rm db-migrator -path /migrations -database "$${DB_DSN}" down 1
+	@echo "Migration rolled back"
+
+.PHONY: test
+test: ## Run unit tests with race detector and coverage
+	@echo "Running unit tests..."
+	$(GOTEST) $(GOCOVER) ./internal/...
+	@echo "Unit tests completed"
+	go tool cover -func=coverage.txt | tail -1
+
+.PHONY: test-verbose
+test-verbose: ## Run verbose tests
+	@echo "Running verbose tests..."
+	@$(GOTEST) -v -race -cover ./internal/...
+
+.PHONY: integration-test
+integration-test: ## Run integration tests (requires Docker + Git Bash)
+	@echo "Running integration tests..."
+	@$(INTEGRATION_STACK) --env-file "$(CURDIR)/.env" up -d db redis rabbitmq
+	@echo "Waiting for database..."
+	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
+		$(INTEGRATION_STACK) exec db pg_isready -U postgres -q 2>/dev/null && break || (echo "  ⏳ Waiting..." && sleep 2); \
+	done
+	@$(INTEGRATION_STACK) exec db pg_isready -U postgres -q 2>/dev/null || (echo "✗ Database not ready" && exit 1)
+	@echo "Database ready"
+	@echo "Applying migrations..."
+	@$(INTEGRATION_STACK) run --rm db-migrator
+	@echo "Running tests..."
+	@$(INTEGRATION_STACK) up --abort-on-container-exit --exit-code-from integration-test integration-test; \
+	TEST_EXIT_CODE=$$?; \
+	$(INTEGRATION_STACK) down --remove-orphans --volumes; \
+	exit $$TEST_EXIT_CODE
+	@echo "Integration tests completed"
+
+.PHONY: test-all
+test-all: test integration-test ## Running all tests (unit + integration)
+	@echo "All tests completed"
+
+.PHONY: format
+format: ## Code fromatting (gofumpt, gci, golines, goimports)
+	@echo "Formatting code..."
+	gofumpt -l -w .
+	gci write . --skip-generated -s standard -s default
+	goimports -w .
+	golines -w --max-len=120 .
+	@echo "Code formatted"
+
+.PHONY: lint
+lint: ## Running golagci_lint
+	@echo "Running linter..."
+	golangci-lint run
+	@echo "Lint passed"
+
+.PHONY: lint-hadolint
+lint-hadolint: ## Run hadolint on Dockerfiles (requires hadolint installed)
+	hadolint Dockerfile
+
+.PHONY: lint-dotenv
+lint-dotenv: ## Run dotenv-linter on .env files (requires dotenv-linter installed)
+	dotenv-linter check -r .
+
+.PHONY: lint-dotenv-fix
+lint-dotenv-fix: ## Fix .env files (requires dotenv-linter installed)
+	dotenv-linter fix --no-backup -r .
+
+.PHONY: swagger
+swagger: ## Generate Swagger docs
+	@echo "Generating Swagger docs..."
+	@swag init -g internal/transport/http/routes.go --output docs
+	@echo "Swagger docs generated in docs/"
+
+.PHONY: pre-commit
+pre-commit: format lint lint-hadolint lint-dotenv swagger ## Run all checks before commit
+	@echo "Pre-commit checks passed!"
+
+.PHONY: build
+build: deps ## Build bin for linux/amd64
+	@echo "Building $(BINARY_NAME)..."
+	@mkdir -p $(BINARY_PATH)
+	@$(GOBUILD) -o $(BINARY_PATH) $(MAIN_PACKAGE)
+	@echo "Binary built: $(BINARY_PATH)"
+
+.PHONY: build-local
+build-local: deps ## build for local os
+	@echo "Building for local OS..."
+	go build -o ./bin/$(BINARY_NAME) $(MAIN_PACKAGE)
+	@echo "Binary built: ./bin/$(BINARY_NAME)"
+
+.PHONY: build-docker
+build-docker: ## Build docker image
+	@echo "Building Docker image..."
+	@docker build -t $(PROJECT_NAME):latest .
+	@echo "Image built: $(PROJECT_NAME):latest"
+
+.PHONY: build-docker-multiarch
+build-docker-multiarch: ## Build multi-arch image for linux/amd64 | linux/arm64
+	@echo "Building multi-arch image..."
+	@docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(PROJECT_NAME):latest --push .
+	@echo "Multi-arch image built and pushed"
+
+.PHONY: clean
+clean: ## clean mock files and artifacts
+	@echo "Cleaning up..."
+	@rm -rf ./bin/ ./docs/ coverage*.txt
+	@find . -type f -name '*_mock.go' -path '*/mock/*' -delete 2>/dev/null || true
+	@echo "Cleanup completed"
+
+.PHONY: clean-cache
+clean-cache: ## Clean test and linter cache
+	@echo "Cleaning caches..."
+	go clean -testcache
+	@$(GOLANGCI_LINT) cache clean 2>/dev/null || true
+	@echo "Caches cleaned"
+
+.PHONY: docker-prune
+docker-prune: ## Pruning docker
+	@echo "Pruning Docker..."
+	@docker system prune -af
+	@echo "Docker pruned"
+
+.PHONY: docker-logs
+docker-logs: ## Show logs all docker containers
+	@$(BASE_STACK) logs -f
+
+.PHONY: install-tools
+install-tools: ## Download develop tools
 	@echo "Installing development tools..."
 	go install golang.org/x/vuln/cmd/govulncheck@latest
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	go install github.com/daixiang0/gci@latest
 	go install mvdan.cc/gofumpt@latest
 	go install github.com/segmentio/golines@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/swaggo/swag/cmd/swag@latest
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	go install github.com/vektra/mockery/v3@v3.5.5
-	@echo "Development tools installed."
+	go install go.uber.org/mock/mockgen@latest
+	@echo "Tools installed"
 
-.PHONY: format
-format: ## Format code using gofumpt, gci, golines, goimports
-	@echo "Formatting code..."
-	gofumpt -l -w .
-	gci write . --skip-generated -s standard -s default
-	golines -w --max-len=120 .
-	goimports -w .
-	@echo "Code formatted."
-
-.PHONY: linter-golangci
-linter-golangci: ## Run golangci-lint linter
-	golangci-lint run
-
-.PHONY: linter-hadolint
-linter-hadolint: ## Run hadolint on Dockerfiles (requires hadolint installed)
-	hadolint Dockerfile
-
-.PHONY: linter-dotenv
-linter-dotenv: ## Run dotenv-linter on .env files (requires dotenv-linter installed)
-	dotenv-linter check -r .
-
-.PHONY: dotenv-fix
-dotenv-fix: ## Fix .env files (requires dotenv-linter installed)
-	dotenv-linter fix --no-backup -r .
-
-.PHONY: swag-v1
-swag-v1: ## Generate Swagger documentation
-	@echo "Generating Swagger documentation..."
-	swag init -g internal/transport/http/routes.go --output docs
-	@echo "Swagger documentation generated."
-
-.PHONY: mock
-mock: ## Generate mocks in target directories
-	@echo "Generating mocks..."
-	mockgen -package=mock_repository -destination=internal/repository/mock/user_repository_mock.go \
-		commenttree/internal/service UserRepository
-	mockgen -package=mock_repository -destination=internal/repository/mock/notify_repository_mock.go \
-		commenttree/internal/service NotifyRepository
-	mockgen -package=mock_repository -destination=internal/repository/mock/cache_repository_mock.go \
-		commenttree/internal/service CacheRepository
-	mockgen -package=mock_sender -destination=internal/transport/sender/mock/sender_mock.go \
-		comment-tree/internal/service NotificationSender
-	@echo "Mocks generated successfully:"
-
-.PHONY: run
-run: deps swag-v1 ## Run the application locally (requires dependencies like DB/Rabbit to be running)
-	@echo "Running application..."
-	go run -tags migrate ./cmd/ctree -config=./configs/dev.env
-
-.PHONY: compose-up
-compose-up: ## Run infrastructure (db, redis, rabbitmq) only
-	$(BASE_STACK) up --build -d db redis rabbitmq
-	$(BASE_STACK) logs -f
-
-.PHONY: migrate-up
-migrate-db: ## Run migrations for db (requires db to be running)
-	$(BASE_STACK) --env-file .env up --build -d db-migrator
-	$(BASE_STACK) logs -f
-
-.PHONY: compose-up-all
-compose-up-all: ## Run all services (infrastructure + app + monitoring)
-	$(BASE_STACK) up --build -d
-	$(BASE_STACK) logs -f
-
-.PHONY: compose-down
-compose-down: ## Stop and remove all containers, networks, and volumes (from all stacks)
-	$(ALL_STACK) down --remove-orphans --volumes
-
-.PHONY: compose-logs
-compose-logs: ## Follow logs for all services
-	$(BASE_STACK) logs -f
-
-.PHONY: compose-logs-app
-compose-logs-app: ## Follow logs for the main application service
-	$(BASE_STACK) logs -f app
-
-.PHONY: test
-test: ## Run unit tests with race detector and coverage
-	@echo "Running unit tests..."
-	go clean -testcache
-	go test -v -race -covermode atomic -coverprofile=coverage_internal.txt ./internal/...
-	@echo "Unit tests completed."
-
-.PHONY: integration-test
-integration-test: ## Run integration tests (requires Docker)
-	@echo "Running integration tests..."
-	$(INTEGRATION_TEST_STACK) up db -d
-	$(INTEGRATION_TEST_STACK) run --rm db-migrator
-	$(INTEGRATION_TEST_STACK) up integration-test --exit-code-from integration-test
-	$(INTEGRATION_TEST_STACK) down --remove-orphans --volumes
-	@echo "Integration tests completed."
-
-.PHONY: pre-commit
-pre-commit: swag-v1 mock format linter-golangci linter-dotenv linter-hadolint test ## Run checks typically done before committing
-	@echo "Pre-commit checks passed."
-
-.PHONY: build
-build: deps ## Build the main application binary
-	@echo "Building application binary..."
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./bin/ctree ./cmd/ctree
-	@echo "Binary built: ./bin/ctree"
-
-.PHONY: build-docker
-build-docker: ## Build main Docker image
-	@echo "Building main Docker image..."
-	docker build -t ctree:latest .
-	@echo "Main Docker image built."
-
-.PHONY: clean
-clean: ## Remove generated files and binaries
-	@echo "Cleaning up..."
-	rm -rf ./bin/
-	rm -rf ./docs/ # Swagger docs
-	find . -name "*mock*" -type f -path "*/mock/*" -delete
-	@echo "Cleanup completed."
-
-.PHONY: docker-prune
-docker-prune: ## Remove unused Docker data (stopped containers, networks, images, build cache)
-	@echo "Pruning Docker data..."
-	docker system prune -af
-	@echo "Docker data pruned."
-
-.PHONY: docker-rm-volume
-docker-rm-volume: ## Remove Docker volume (example for pgdata)
-	@echo "Removing Docker volume 'pgdata'..."
-	docker volume rm l0_pgdata
-	@echo "Volume removal attempted."
+.PHONY: check-requirements
+check-requirements: ## Check all requirments
+	@echo "Checking requirements..."
+	@command -v go >/dev/null 2>&1 || { echo "Go not found"; exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo "Docker not found"; exit 1; }
+	@command -v docker compose >/dev/null 2>&1 || { echo "Docker Compose not found"; exit 1; }
+	@echo "All requirements met"

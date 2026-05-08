@@ -2,20 +2,26 @@ package service
 
 type Option func(*CommentService)
 
-func WithMaxDepth(depth int) Option {
+func MaxDepth(depth uint64) Option {
 	return func(s *CommentService) {
-		s.maxDepth = depth
+		if depth > 0 {
+			s.maxDepth = depth
+		}
 	}
 }
 
-func WithDefaultPageSize(size int) Option {
+func DefaultPageSize(size uint64) Option {
 	return func(s *CommentService) {
-		s.defaultPageSize = size
+		if size > 0 {
+			s.pageSize = size
+		}
 	}
 }
 
-func WithMaxPageSize(size int) Option {
+func MaxPageSize(size uint64) Option {
 	return func(s *CommentService) {
-		s.maxPageSize = size
+		if size > 0 {
+			s.maxPageSize = size
+		}
 	}
 }

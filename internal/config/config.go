@@ -10,26 +10,26 @@ type (
 		Cache    Cache    `env-prefix:"CACHE_"`
 		HTTP     HTTP     `env-prefix:"HTTP_"`
 		Logger   Logger   `env-prefix:"LOGGER_"`
-		Env      string   `env:"ENV" env-default:"local" validate:"oneof=local dev staging prod"`
+		Env      string   `                      env:"ENV" env-default:"local" validate:"oneof=local dev staging prod"`
 	}
 
 	App struct {
 		Name    string `env:"NAME"    env-default:"ctree" validate:"required"`
-		Version string `env:"VERSION" env-default:"1.0.0"            validate:"required"`
+		Version string `env:"VERSION" env-default:"1.0.0" validate:"required"`
 	}
 
 	Service struct {
-		MaxDepth        int `env:"MAX_DEPTH" env-default:"10" validate:"min=1,max=100"`
-		DefaultPageSize int `env:"DEFAULT_PAGE_SIZE" env-default:"10" validate:"min=1,max=100"`
-		MaxPageSize     int `env:"MAX_PAGE_SIZE" env-default:"10" validate:"min=1,max=100"`
+		MaxDepth        uint64 `env:"MAX_DEPTH"         env-default:"10" validate:"min=1,max=100"`
+		DefaultPageSize uint64 `env:"DEFAULT_PAGE_SIZE" env-default:"10" validate:"min=1,max=100"`
+		MaxPageSize     uint64 `env:"MAX_PAGE_SIZE"     env-default:"10" validate:"min=1,max=100"`
 	}
 
 	Database struct {
-		DSN            string        `env:"DSN"              env-default:"postgres://user:pass@localhost:5432/delayed_notifier?sslmode=disable" validate:"required"`
-		PoolMax        int32         `env:"POOL_MAX"         env-default:"20"                                                                   validate:"min=1,max=100"`
-		ConnAttempts   int           `env:"CONN_ATTEMPTS"    env-default:"5"                                                                    validate:"min=1,max=10"`
-		BaseRetryDelay time.Duration `env:"BASE_RETRY_DELAY" env-default:"100ms"                                                                validate:"gte=10ms,lte=10s"`
-		MaxRetryDelay  time.Duration `env:"MAX_RETRY_DELAY"  env-default:"5s"                                                                   validate:"gte=100ms,lte=30s,gtefield=BaseRetryDelay"`
+		DSN            string        `env:"DSN"              env-default:"postgres://user:pass@localhost:5432/ctree?sslmode=disable" validate:"required"`
+		PoolMax        int32         `env:"POOL_MAX"         env-default:"20"                                                        validate:"min=1,max=100"`
+		ConnAttempts   int           `env:"CONN_ATTEMPTS"    env-default:"5"                                                         validate:"min=1,max=10"`
+		BaseRetryDelay time.Duration `env:"BASE_RETRY_DELAY" env-default:"100ms"                                                     validate:"gte=10ms,lte=10s"`
+		MaxRetryDelay  time.Duration `env:"MAX_RETRY_DELAY"  env-default:"5s"                                                        validate:"gte=100ms,lte=30s,gtefield=BaseRetryDelay"`
 	}
 
 	Cache struct {
@@ -54,10 +54,10 @@ type (
 	}
 
 	Logger struct {
-		Level      string `env:"LEVEL"       env-default:"info"                        validate:"oneof=debug info warn error"`
-		Filename   string `env:"FILENAME"    env-default:"./logs/delayed-notifier.log"`
-		MaxSize    int    `env:"MAX_SIZE"    env-default:"100"                         validate:"min=1,max=1000"`
-		MaxBackups int    `env:"MAX_BACKUPS" env-default:"3"                           validate:"min=0,max=20"`
-		MaxAge     int    `env:"MAX_AGE"     env-default:"28"                          validate:"min=1,max=365"`
+		Level      string `env:"LEVEL"       env-default:"info"                    validate:"oneof=debug info warn error"`
+		Filename   string `env:"FILENAME"    env-default:"./logs/comment-tree.log"`
+		MaxSize    int    `env:"MAX_SIZE"    env-default:"100"                     validate:"min=1,max=1000"`
+		MaxBackups int    `env:"MAX_BACKUPS" env-default:"3"                       validate:"min=0,max=20"`
+		MaxAge     int    `env:"MAX_AGE"     env-default:"28"                      validate:"min=1,max=365"`
 	}
 )

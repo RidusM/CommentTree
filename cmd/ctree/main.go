@@ -1,8 +1,6 @@
 package main
 
 import (
-	"comtree/internal/app"
-	"comtree/internal/config"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +8,9 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+
+	"ctree/internal/app"
+	"ctree/internal/config"
 
 	cleanenvport "github.com/wb-go/wbf/config/cleanenv-port"
 	"github.com/wb-go/wbf/logger"
@@ -52,21 +53,21 @@ func run() error {
 		return fmt.Errorf("logger init: %w", err)
 	}
 
-	log.Info("starting application",
-		"name", cfg.App.Name,
-		"version", cfg.App.Version,
-		"env", cfg.Env,
-		"http_addr", cfg.HTTP.Host+":"+cfg.HTTP.Port,
+	log.LogAttrs(ctx, logger.InfoLevel, "starting application",
+		logger.String("name", cfg.App.Name),
+		logger.String("version", cfg.App.Version),
+		logger.String("env", cfg.Env),
+		logger.String("http_addr", cfg.HTTP.Host+":"+cfg.HTTP.Port),
 	)
 
 	if appErr := app.Run(ctx, &cfg, log); appErr != nil {
 		if errors.Is(appErr, context.Canceled) {
-			log.Info("application stopped gracefully")
+			log.LogAttrs(ctx, logger.InfoLevel, "application stopped gracefully")
 			return nil
 		}
 		return fmt.Errorf("app run: %w", appErr)
 	}
 
-	log.Info("shutdown complete")
+	log.LogAttrs(ctx, logger.InfoLevel, "shutdown complete")
 	return nil
 }

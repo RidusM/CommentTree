@@ -1,33 +1,36 @@
+//nolint:revive, staticcheck
 package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
+	"ctree/internal/entity"
+	"ctree/internal/service"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-
-	"comtree/internal/entity"
-	"comtree/internal/service"
 )
 
-// Create comment
-// @Summary Создать комментарий
-// @Description Создаёт новый комментарий с указанием родительского (опционально). Возвращает созданный объект с вычисленным путём и глубиной
+// @Summary Create a comment
+// @Description Creates a new comment with an optional parent. Returns the created object with the calculated path and depth.
 // @Tags Comments
 // @Accept json
 // @Produce json
-// @Param request body CreateCommentRequest true "Данные комментария"
-// @Success 201 {object} CommentResponse "Комментарий создан"
-// @Failure 400 {object} ErrorResponse "Ошибка валидации входных данных"
-// @Failure 404 {object} ErrorResponse "Родительский комментарий не найден"
-// @Failure 422 {object} ErrorResponse "Превышена максимальная глубина вложенности"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка сервера"
+// @Param request body CreateCommentRequest true "Comment data"
+// @Success 201 {object} CommentResponse "Comment created"
+// @Failure 400 {object} ErrorResponse "Input validation error"
+// @Failure 404 {object} ErrorResponse "Parent comment not found"
+// @Failure 422 {object} ErrorResponse "Maximum nesting depth exceeded"
+// @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /comments [post]
 func (h *CommentHandler) CreateComment(c *gin.Context) {
-	var req service.CreateCommentRequest
+	ctx := c.Request.Context()
+
+	var req CreateCommentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.respondError(c, http.StatusBadRequest, "invalid_json", "Invalid request payload", err)
 		return
@@ -37,33 +40,40 @@ func (h *CommentHandler) CreateComment(c *gin.Context) {
 		req.ParentID = nil
 	}
 
-	comment, err := h.svc.CreateComment(c.Request.Context(), req)
+	serviceReq := service.CreateCommentRequest{
+		ParentID: req.ParentID,
+		Author:   req.Author,
+		Content:  req.Content,
+	}
+
+	comment, err := h.svc.CreateComment(ctx, serviceReq)
 	if err != nil {
-		h.handleServiceError(c, "handler.CreateComment", err)
+		h.handleServiceError(c, err)
 		return
 	}
 
-	c.Header("Location", "/comments/"+comment.ID.String())
+	c.Header("Location", fmt.Sprintf("/comments/%s", comment.ID))
 	h.respondJSON(c, http.StatusCreated, toCommentResponse(*comment))
 }
 
-// Get comments tree
-// @Summary Получить дерево комментариев
-// @Description Возвращает дерево комментариев: либо корни (если parent_id не указан), либо поддерево от указанного родителя. Поддерживает пагинацию
+// @Summary Get the comment tree
+// @Description Returns the comment tree: either the roots (if parent_id is not specified) or a subtree from the specified parent. Supports pagination
 // @Tags Comments
 // @Produce json
-// @Param parent_id query string false "ID родительского комментария (для получения поддерева)" Format(uuid)
-// @Param page query int false "Номер страницы" default(1) minimum(1)
-// @Param page_size query int false "Размер страницы" default(20) minimum(1) maximum(100)
-// @Success 200 {object} CommentListResponse "Список комментариев с деревом"
-// @Failure 400 {object} ErrorResponse "Неверный формат UUID или параметров пагинации"
-// @Failure 404 {object} ErrorResponse "Комментарий не найден"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка сервера"
+// @Param parent_id query string false "Parent comment ID (to get a subtree)" Format(uuid)
+// @Param page query int false "Page number" default(1) minimum(1)
+// @Param page_size query int false "Page size" default(20) minimum(1) maximum(100)
+// @Success 200 {object} CommentListResponse "Comment list with tree"
+// @Failure 400 {object} ErrorResponse "Invalid UUID or pagination parameters format"
+// @Failure 404 {object} ErrorResponse "Comment not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /comments [get]
 func (h *CommentHandler) GetComments(c *gin.Context) {
-	var req service.GetCommentsRequest
-	req.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
-	req.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	ctx := c.Request.Context()
+
+	var req GetCommentsRequest
+	req.Page, _ = strconv.ParseUint(c.DefaultQuery("page", "1"), 10, 64)
+	req.PageSize, _ = strconv.ParseUint(c.DefaultQuery("page_size", "20"), 10, 64)
 
 	if pid := c.Query("parent_id"); pid != "" {
 		id, err := uuid.Parse(pid)
@@ -74,105 +84,117 @@ func (h *CommentHandler) GetComments(c *gin.Context) {
 		req.ParentID = &id
 	}
 
-	result, err := h.svc.GetComments(c.Request.Context(), req)
+	serviceReq := service.GetCommentsRequest{
+		ParentID: req.ParentID,
+		Page:     req.Page,
+		PageSize: req.PageSize,
+	}
+
+	comment, err := h.svc.GetComments(ctx, serviceReq)
 	if err != nil {
-		h.handleServiceError(c, "handler.GetComments", err)
+		h.handleServiceError(c, err)
 		return
 	}
 
-	resp := CommentListResponse{
-		Comments:   make([]CommentTreeResponse, len(result.Comments)),
-		TotalCount: result.TotalCount,
-		Page:       result.Page,
-		PageSize:   result.PageSize,
-		TotalPages: result.TotalPages,
+	response := CommentListResponse{
+		Comments:   make([]CommentTreeResponse, len(comment.Comments)),
+		TotalCount: comment.TotalCount,
+		Page:       comment.Page,
+		PageSize:   comment.PageSize,
+		TotalPages: comment.TotalPages,
 	}
-	for i, ct := range result.Comments {
-		resp.Comments[i] = toCommentTreeResponse(ct)
+	for i, ct := range comment.Comments {
+		response.Comments[i] = toCommentTreeResponse(ct)
 	}
 
-	h.respondJSON(c, http.StatusOK, resp)
+	h.respondJSON(c, http.StatusOK, response)
 }
 
-// Search comments
-// @Summary Поиск по комментариям
-// @Description Полнотекстовый поиск по автору и содержимому комментариев. Возвращает плоский список совпадений с пагинацией
+// @Summary Search comments
+// @Description Full-text search by author and comment content. Returns a flat list of matches with pagination.
 // @Tags Comments
 // @Produce json
-// @Param q query string true "Поисковый запрос" minlength(1)
-// @Param page query int false "Номер страницы" default(1) minimum(1)
-// @Param page_size query int false "Размер страницы" default(20) minimum(1) maximum(100)
-// @Success 200 {object} SearchResponse "Результаты поиска"
-// @Failure 400 {object} ErrorResponse "Пустой или невалидный поисковый запрос"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка сервера"
+// @Param q query string true "Search query" minlength(1)
+// @Param page query int false "Page number" default(1) minimum(1)
+// @Param page_size query int false "Page size" default(20) minimum(1) maximum(100)
+// @Success 200 {object} SearchResponse "Search results"
+// @Failure 400 {object} ErrorResponse "Empty or invalid search query"
+// @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /comments/search [get]
 func (h *CommentHandler) SearchComments(c *gin.Context) {
-	q := c.Query("q")
-	if q == "" {
-		h.respondError(c, http.StatusBadRequest, "empty_query", "Search query is required", nil)
+	ctx := c.Request.Context()
+
+	var req SearchRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		h.respondError(c, http.StatusBadRequest, "invalid_query", "Invalid query parameters", err)
 		return
 	}
 
-	req := service.SearchRequest{
-		Query:    q,
-		Page:     1,
-		PageSize: 20,
+	serviceReq := service.SearchRequest{
+		Query:    req.Query,
+		Page:     req.Page,
+		PageSize: req.PageSize,
 	}
-	req.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
-	req.PageSize, _ = strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	result, err := h.svc.SearchComments(c.Request.Context(), req)
+	comments, err := h.svc.SearchComments(ctx, serviceReq)
 	if err != nil {
-		h.handleServiceError(c, "handler.SearchComments", err)
+		h.handleServiceError(c, err)
 		return
 	}
 
-	resp := SearchResponse{
-		Comments:   make([]CommentResponse, len(result.Comments)),
-		TotalCount: result.TotalCount,
-		Query:      result.Query,
+	response := SearchResponse{
+		Comments:   make([]CommentResponse, len(comments.Comments)),
+		TotalCount: comments.TotalCount,
+		Query:      comments.Query,
 	}
-	for i, cm := range result.Comments {
-		resp.Comments[i] = toCommentResponse(cm)
+	for i, cm := range comments.Comments {
+		response.Comments[i] = toCommentResponse(cm)
 	}
 
-	h.respondJSON(c, http.StatusOK, resp)
+	h.respondJSON(c, http.StatusOK, response)
 }
 
-// Delete comment
-// @Summary Удалить комментарий
-// @Description Мягкое удаление комментария и всех его вложенных потомков (каскадно). Комментарий помечается как is_deleted=true
+// @Summary Delete comment
+// @Description Soft delete comment and all its descendants (cascade). The comment is marked as is_deleted=true
 // @Tags Comments
 // @Produce json
-// @Param id path string true "ID комментария" Format(uuid)
-// @Success 200 {object} SuccessResponse "Комментарий удалён"
-// @Failure 400 {object} ErrorResponse "Неверный формат UUID"
-// @Failure 404 {object} ErrorResponse "Комментарий не найден"
-// @Failure 500 {object} ErrorResponse "Внутренняя ошибка сервера"
+// @Param id path string true "Comment ID" Format(uuid)
+// @Success 200 {object} SuccessResponse "Comment deleted"
+// @Failure 400 {object} ErrorResponse "Invalid UUID format"
+// @Failure 404 {object} ErrorResponse "Comment not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /comments/{id} [delete]
 func (h *CommentHandler) DeleteComment(c *gin.Context) {
+	ctx := c.Request.Context()
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		h.respondError(c, http.StatusBadRequest, "invalid_uuid", "Invalid comment ID", err)
 		return
 	}
 
-	if err := h.svc.DeleteComment(c.Request.Context(), id); err != nil {
-		if errors.Is(err, service.ErrCommentNotFound) {
+	if err = h.svc.DeleteComment(ctx, id); err != nil {
+		if errors.Is(err, entity.ErrCommentNotFound) {
 			h.respondError(c, http.StatusNotFound, "not_found", "Comment not found", err)
 			return
 		}
-		h.handleServiceError(c, "handler.DeleteComment", err)
+		h.handleServiceError(c, err)
 		return
 	}
 
 	h.respondJSON(c, http.StatusOK, SuccessResponse{Message: "Comment deleted"})
 }
 
+// @Summary Health check endpoint
+// @Description Return service status and current timestamp. No authentication required.
+// @Tags System
+// @Produce json
+// @Success 200 {object} HealthResponse "Service is healthy"
+// @Router /health [get]
 func (h *CommentHandler) Health(c *gin.Context) {
-	response := map[string]string{
-		"status": "ok",
-		"time":   time.Now().Format(time.RFC3339),
+	response := HealthResponse{
+		Status: "ok",
+		Time:   time.Now(),
 	}
 	h.respondJSON(c, http.StatusOK, response)
 }
@@ -200,7 +222,7 @@ func toCommentResponse(c entity.Comment) CommentResponse {
 		Content:   c.Content,
 		IsDeleted: c.IsDeleted,
 		Depth:     c.Depth,
-		CreatedAt: c.CreatedAt(),
+		CreatedAt: c.CreatedAt,
 	}
 }
 

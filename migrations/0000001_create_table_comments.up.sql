@@ -1,12 +1,13 @@
 CREATE TABLE IF NOT EXISTS comments (
     id UUID PRIMARY KEY,
     parent_id UUID REFERENCES comments(id) ON DELETE SET NULL,
-    path TEXT NOT NULL,
     author VARCHAR(100) NOT NULL,
     content TEXT NOT NULL,
-    depth INT NOT NULL DEFAULT 0 CHECK (depth >= 0),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    path TEXT NOT NULL,
+    depth INT NOT NULL DEFAULT 0 CHECK (depth >= 0),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
 );
 
 CREATE INDEX idx_comments_path ON comments USING btree (path varchar_pattern_ops);

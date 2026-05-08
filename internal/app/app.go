@@ -1,13 +1,14 @@
 package app
 
 import (
-	"comtree/internal/config"
-	"comtree/internal/repository"
-	"comtree/internal/service"
-	handler "comtree/internal/transport/http"
 	"context"
 	"errors"
 	"fmt"
+
+	"ctree/internal/config"
+	"ctree/internal/repository"
+	"ctree/internal/service"
+	handler "ctree/internal/transport/http"
 
 	pgxdriver "github.com/wb-go/wbf/dbpg/pgx-driver"
 	"github.com/wb-go/wbf/dbpg/pgx-driver/transaction"
@@ -20,54 +21,108 @@ func Run(ctx context.Context, cfg *config.Config, log logger.Logger) error {
 	var (
 		db  *pgxdriver.Postgres
 		rdb *redis.Client
-		tm  transaction.Manager
 		err error
 	)
 
 	defer func() {
-		if db != nil {
-			db.Close()
-			log.Info("database connection closed")
-		}
-		if rdb != nil {
-			if closeErr := rdb.Close(); closeErr != nil {
-				log.Warn("failed to close cache", "error", closeErr)
-			}
-		}
-		log.Info("all resources cleaned up")
+		closeResources(ctx, db, rdb, log)
 	}()
 
-	db, err = initDatabase(&cfg.Database, log)
+	db, rdb, err = initInfrastructure(ctx, cfg, log)
 	if err != nil {
-		return fmt.Errorf("init database: %w", err)
+		return err
 	}
-	log.Info("database initialized successfully")
 
-	tm, err = initTransactionManager(db, log)
+	tm, err := transaction.NewManager(db, log)
 	if err != nil {
 		return fmt.Errorf("init transaction manager: %w", err)
 	}
 
-	rdb, err = initCache(ctx, &cfg.Cache)
-	if err != nil {
-		return fmt.Errorf("init cache: %w", err)
-	}
-	log.Info("cache initialized successfully")
+	handler := initHandler(cfg, db, rdb, tm, log)
 
 	eg, ctx := errgroup.WithContext(ctx)
 
-svc := initCommentService(&cfg.Service, db, tm, rdb, log)
-
-	handlers := handler.NewCommentHandler(svc, log)
-	httpServer := handler.NewHTTPServer(handlers, &cfg.HTTP, log)
 	eg.Go(func() error {
-		return httpServer.Start(ctx)
+		return startHTTPServer(ctx, handler, &cfg.HTTP, log)
 	})
 
 	if egErr := eg.Wait(); egErr != nil && !errors.Is(egErr, context.Canceled) {
 		return fmt.Errorf("app execution failed: %w", egErr)
 	}
 
+	return nil
+}
+
+func closeResources(
+	ctx context.Context,
+	db *pgxdriver.Postgres,
+	rdb *redis.Client,
+	log logger.Logger,
+) {
+	if db != nil {
+		db.Close()
+		log.LogAttrs(ctx, logger.InfoLevel, "database connection closed")
+	}
+	if rdb != nil {
+		if closeErr := rdb.Close(); closeErr != nil {
+			log.LogAttrs(ctx, logger.WarnLevel, "failed to close cache",
+				logger.Any("error", closeErr),
+			)
+		}
+	}
+	log.LogAttrs(ctx, logger.InfoLevel, "all resources cleaned up")
+}
+
+func initInfrastructure(
+	ctx context.Context,
+	cfg *config.Config,
+	log logger.Logger,
+) (*pgxdriver.Postgres, *redis.Client, error) {
+	db, err := initDatabase(&cfg.Database, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init database: %w", err)
+	}
+	log.LogAttrs(ctx, logger.InfoLevel, "database initialized successfully")
+
+	rdb, err := initCache(ctx, &cfg.Cache)
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("init cache: %w", err)
+	}
+	log.LogAttrs(ctx, logger.InfoLevel, "cache initialized successfully")
+
+	return db, rdb, nil
+}
+
+func initHandler(
+	cfg *config.Config,
+	db *pgxdriver.Postgres,
+	rdb *redis.Client,
+	tm transaction.Manager,
+	log logger.Logger,
+) *handler.CommentHandler {
+	commRepo := repository.NewCommentRepository(db)
+	cacheRepo := repository.NewCacheRepository(rdb)
+
+	svc := service.NewCommentService(
+		commRepo,
+		cacheRepo,
+		tm,
+		log,
+		service.DefaultPageSize(cfg.Service.DefaultPageSize),
+		service.MaxPageSize(cfg.Service.MaxPageSize),
+		service.MaxDepth(cfg.Service.MaxDepth),
+	)
+
+	handler := handler.NewCommentHandler(svc, log)
+	return handler
+}
+
+func startHTTPServer(ctx context.Context, h *handler.CommentHandler, cfg *config.HTTP, log logger.Logger) error {
+	server := handler.NewHTTPServer(h, cfg, log)
+	if err := server.Start(ctx); err != nil {
+		return fmt.Errorf("start http server: %w", err)
+	}
 	return nil
 }
 
@@ -86,14 +141,6 @@ func initDatabase(cfg *config.Database, log logger.Logger) (*pgxdriver.Postgres,
 	return db, nil
 }
 
-func initTransactionManager(db *pgxdriver.Postgres, log logger.Logger) (transaction.Manager, error) {
-	tm, err := transaction.NewManager(db, log)
-	if err != nil {
-		return nil, fmt.Errorf("create transaction manager: %w", err)
-	}
-	return tm, nil
-}
-
 func initCache(ctx context.Context, cfg *config.Cache) (*redis.Client, error) {
 	initCtx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
 	defer cancel()
@@ -101,30 +148,8 @@ func initCache(ctx context.Context, cfg *config.Cache) (*redis.Client, error) {
 	rdb := redis.New(cfg.Addr, cfg.Password, cfg.DB)
 
 	if err := rdb.Ping(initCtx); err != nil {
-		_ = rdb.Close() //nolint:gosec // error during ping is more important
+		_ = rdb.Close()
 		return nil, fmt.Errorf("cache ping failed: %w", err)
 	}
 	return rdb, nil
-}
-
-func initCommentService(
-	cfg *config.Service,
-	db *pgxdriver.Postgres,
-	tm transaction.Manager,
-	rdb *redis.Client,
-	log logger.Logger,
-) *service.CommentService {
-	commentRepo := repository.NewCommentRepository(db)
-	cacheRepo := repository.NewCacheRepository(rdb)
-
-	svc := service.NewCommentService(
-		commentRepo,
-		cacheRepo,
-		tm,
-		log,
-		service.WithDefaultPageSize(cfg.DefaultPageSize),
-		service.WithMaxDepth(cfg.MaxDepth),
-		service.WithMaxPageSize(cfg.MaxPageSize),
-	)
-	return svc
 }

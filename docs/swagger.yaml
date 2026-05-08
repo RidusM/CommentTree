@@ -1,0 +1,299 @@
+basePath: /
+definitions:
+  handler.CommentListResponse:
+    properties:
+      comments:
+        items:
+          $ref: '#/definitions/handler.CommentTreeResponse'
+        type: array
+      page:
+        example: 1
+        type: integer
+      page_size:
+        example: 20
+        type: integer
+      total_count:
+        example: 800
+        type: integer
+      total_pages:
+        example: 40
+        type: integer
+    type: object
+  handler.CommentResponse:
+    properties:
+      author:
+        example: admin
+        type: string
+      content:
+        example: hello world
+        type: string
+      created_at:
+        example: "2023-10-27T10:00:00Z"
+        type: string
+      depth:
+        example: 2
+        type: integer
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440001
+        type: string
+      is_deleted:
+        example: false
+        type: boolean
+      parent_id:
+        example: 550e8400-e29b-41d4-a716-446655440001
+        type: string
+    type: object
+  handler.CommentTreeResponse:
+    properties:
+      children:
+        items:
+          $ref: '#/definitions/handler.CommentTreeResponse'
+        type: array
+      comment:
+        $ref: '#/definitions/handler.CommentResponse'
+    type: object
+  handler.CreateCommentRequest:
+    properties:
+      author:
+        example: admin
+        maxLength: 100
+        minLength: 1
+        type: string
+      content:
+        example: hello world
+        maxLength: 5000
+        minLength: 1
+        type: string
+      parent_id:
+        example: 550e8400-e29b-41d4-a716-446655440001
+        type: string
+    required:
+    - author
+    - content
+    type: object
+  handler.ErrorResponse:
+    properties:
+      code:
+        example: NOT_FOUND
+        type: string
+      details:
+        example: comment with id 123 does not exist
+        type: string
+      error:
+        example: comment not found
+        type: string
+    type: object
+  handler.HealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+      time:
+        example: "2026-05-08T06:04:15Z"
+        type: string
+    type: object
+  handler.SearchResponse:
+    properties:
+      comments:
+        items:
+          $ref: '#/definitions/handler.CommentResponse'
+        type: array
+      query:
+        example: admin
+        type: string
+      total_count:
+        example: 54
+        type: integer
+    type: object
+  handler.SuccessResponse:
+    properties:
+      message:
+        example: Operation completed successfully
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: stormkillpeople@gmail.com
+    name: RidusM
+  description: Service for work with tree comments
+  license:
+    name: MIT-0
+    url: https://github.com/aws/mit-0
+  termsOfService: http://swagger.io/terms/
+  title: Comment Tree Service API
+  version: "1.0"
+paths:
+  /comments:
+    get:
+      description: 'Returns the comment tree: either the roots (if parent_id is not
+        specified) or a subtree from the specified parent. Supports pagination'
+      parameters:
+      - description: Parent comment ID (to get a subtree)
+        format: uuid
+        in: query
+        name: parent_id
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Comment list with tree
+          schema:
+            $ref: '#/definitions/handler.CommentListResponse'
+        "400":
+          description: Invalid UUID or pagination parameters format
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Comment not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get the comment tree
+      tags:
+      - Comments
+    post:
+      consumes:
+      - application/json
+      description: Creates a new comment with an optional parent. Returns the created
+        object with the calculated path and depth.
+      parameters:
+      - description: Comment data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.CreateCommentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Comment created
+          schema:
+            $ref: '#/definitions/handler.CommentResponse'
+        "400":
+          description: Input validation error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Parent comment not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "422":
+          description: Maximum nesting depth exceeded
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Create a comment
+      tags:
+      - Comments
+  /comments/{id}:
+    delete:
+      description: Soft delete comment and all its descendants (cascade). The comment
+        is marked as is_deleted=true
+      parameters:
+      - description: Comment ID
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Comment deleted
+          schema:
+            $ref: '#/definitions/handler.SuccessResponse'
+        "400":
+          description: Invalid UUID format
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Comment not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Delete comment
+      tags:
+      - Comments
+  /comments/search:
+    get:
+      description: Full-text search by author and comment content. Returns a flat
+        list of matches with pagination.
+      parameters:
+      - description: Search query
+        in: query
+        minLength: 1
+        name: q
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Search results
+          schema:
+            $ref: '#/definitions/handler.SearchResponse'
+        "400":
+          description: Empty or invalid search query
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Search comments
+      tags:
+      - Comments
+  /health:
+    get:
+      description: Return service status and current timestamp. No authentication
+        required.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            $ref: '#/definitions/handler.HealthResponse'
+      summary: Health check endpoint
+      tags:
+      - System
+swagger: "2.0"
